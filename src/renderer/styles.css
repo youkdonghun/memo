@@ -98,13 +98,18 @@ button {
   background: var(--handle-bg, var(--note-bg));
   color: var(--handle-text, var(--note-text));
   box-shadow: 0 10px 28px rgba(28, 35, 50, 0.16);
-  cursor: pointer;
+  cursor: grab;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   white-space: normal;
+  touch-action: none;
+}
+
+.edge-handle:active {
+  cursor: grabbing;
 }
 
 .dock-right .edge-handle {

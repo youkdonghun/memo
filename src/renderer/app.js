@@ -20,6 +20,7 @@ const CHECK_TEXT_PLACEHOLDER = "\u200b";
 const HANDLE_TITLE_PREFIX_LENGTH = 5;
 const FONT_SIZE_OPTIONS = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32];
 const LINE_SPACING_OPTIONS = [1, 1.15, 1.5, 2, 2.5, 3];
+const HANDLE_REORDER_THRESHOLD = 18;
 
 const FONT_LABELS = {
   Gulim: "굴림체",
@@ -900,6 +901,14 @@ function renderHandleLabel(button, text) {
   });
 }
 
+function endHandleDrag() {
+  if (!handleDragState && !draggingHandle) return;
+  handleDragState = null;
+  setTimeout(() => {
+    draggingHandle = false;
+  }, 0);
+}
+
 function renderHandles() {
   handleRail.innerHTML = "";
 
@@ -916,17 +925,16 @@ function renderHandles() {
     button.style.setProperty("--handle-bg", bg);
     button.style.setProperty("--handle-text", readableTextColor(bg));
 
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
       if (draggingHandle) return;
+      if (event.detail >= 2) {
+        event.preventDefault();
+        event.stopPropagation();
+        renameMemo(memo.id, index);
+        return;
+      }
       selectMemo(memo.id);
       setExpanded(true);
-    });
-
-    button.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      draggingHandle = false;
-      renameMemo(memo.id, index);
     });
 
     button.addEventListener("pointerdown", (event) => {
@@ -934,9 +942,11 @@ function renderHandles() {
       draggingHandle = false;
       handleDragState = {
         id: memo.id,
+        floatingIndex: state.floatingIds.indexOf(memo.id),
         startX: event.screenX,
         startY: event.screenY,
         lastAlong: isHorizontalDock() ? event.clientX : event.clientY,
+        reorderCarry: 0,
         detached: false
       };
       button.setPointerCapture(event.pointerId);
@@ -966,15 +976,22 @@ function renderHandles() {
       if (Math.abs(delta) < 4) return;
       draggingHandle = true;
       handleDragState.lastAlong = currentPosition;
+      if (state.floatingIds.length > 1) {
+        handleDragState.reorderCarry += delta;
+        if (Math.abs(handleDragState.reorderCarry) >= HANDLE_REORDER_THRESHOLD) {
+          const direction = handleDragState.reorderCarry > 0 ? 1 : -1;
+          const moved = moveFloatingMemo(memo.id, direction);
+          if (moved) {
+            handleDragState.floatingIndex = state.floatingIds.indexOf(memo.id);
+            handleDragState.reorderCarry = 0;
+          }
+        }
+        return;
+      }
       nudgeShellPosition(delta);
     });
 
-    button.addEventListener("pointerup", () => {
-      handleDragState = null;
-      setTimeout(() => {
-        draggingHandle = false;
-      }, 0);
-    });
+    button.addEventListener("pointerup", endHandleDrag);
 
     handleRail.appendChild(button);
   });
@@ -1436,8 +1453,13 @@ function insertTable() {
   pushEditorHistory();
 }
 
-function currentTableCell() {
+function selectedTableCell() {
   const selectedCell = getSelectionElement()?.closest(".memo-table td") || null;
+  return selectedCell && editor.contains(selectedCell) ? selectedCell : null;
+}
+
+function currentTableCell() {
+  const selectedCell = selectedTableCell();
   if (selectedCell && editor.contains(selectedCell)) {
     lastTableCell = selectedCell;
     return selectedCell;
@@ -1454,7 +1476,9 @@ function setTableToolsOpen(open) {
 }
 
 function updateTableTools() {
-  setTableToolsOpen(Boolean(currentMemoTable()));
+  const cell = selectedTableCell();
+  if (cell) lastTableCell = cell;
+  setTableToolsOpen(Boolean(cell));
 }
 
 function tableCells(table) {
@@ -2190,9 +2214,9 @@ function renderIndexManager() {
 
 function moveFloatingMemo(id, delta) {
   const currentIndex = state.floatingIds.indexOf(id);
-  if (currentIndex < 0) return;
+  if (currentIndex < 0) return false;
   const nextIndex = currentIndex + delta;
-  if (nextIndex < 0 || nextIndex >= state.floatingIds.length) return;
+  if (nextIndex < 0 || nextIndex >= state.floatingIds.length) return false;
   const nextIds = [...state.floatingIds];
   const [moved] = nextIds.splice(currentIndex, 1);
   nextIds.splice(nextIndex, 0, moved);
@@ -2201,6 +2225,7 @@ function moveFloatingMemo(id, delta) {
   renderAllMemoList();
   renderIndexManager();
   saveState();
+  return true;
 }
 
 function setFloatingMemo(id, shouldFloat) {
@@ -2411,6 +2436,22 @@ editor.addEventListener("click", (event) => {
 });
 document.addEventListener("selectionchange", () => {
   if (document.activeElement === editor || editor.contains(document.activeElement)) updateTableTools();
+});
+document.addEventListener("pointerup", endHandleDrag);
+document.addEventListener("pointercancel", endHandleDrag);
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (
+    editor.contains(target) ||
+    tableTools?.contains(target) ||
+    tablePicker?.contains(target) ||
+    tableButton?.contains(target)
+  ) {
+    return;
+  }
+  lastTableCell = null;
+  setTableToolsOpen(false);
 });
 collapseButton.addEventListener("click", () => setExpanded(false));
 settingsButton.addEventListener("click", openSettings);
