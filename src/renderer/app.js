@@ -156,6 +156,7 @@ const panelResizeGrip = document.getElementById("panelResizeGrip");
 const saveStatus = document.getElementById("saveStatus");
 const collapseButton = document.getElementById("collapseButton");
 const settingsButton = document.getElementById("settingsButton");
+const deleteActiveMemoButton = document.getElementById("deleteActiveMemoButton");
 const closeSettingsButton = document.getElementById("closeSettingsButton");
 const addIndexButton = document.getElementById("addIndexButton");
 const undoButton = document.getElementById("undoButton");
@@ -175,6 +176,7 @@ const addTableColButton = document.getElementById("addTableColButton");
 const deleteTableRowButton = document.getElementById("deleteTableRowButton");
 const deleteTableColButton = document.getElementById("deleteTableColButton");
 const mergeTableCellsButton = document.getElementById("mergeTableCellsButton");
+const mergeTableDownButton = document.getElementById("mergeTableDownButton");
 const splitTableCellButton = document.getElementById("splitTableCellButton");
 const tableBorderColorInput = document.getElementById("tableBorderColorInput");
 const tableBorderWidthInput = document.getElementById("tableBorderWidthInput");
@@ -481,11 +483,10 @@ function populateFontFamilySelect(select, currentFont) {
     const option = document.createElement("option");
     option.value = font;
     option.textContent = FONT_LABELS[font] || font;
-    option.style.fontFamily = fontFamilyCss(font);
     select.appendChild(option);
   });
   select.value = current;
-  select.style.fontFamily = fontFamilyCss(current);
+  select.style.fontFamily = "var(--common-font-family)";
 }
 
 function populateFontSizeSelect(select, currentSize) {
@@ -514,7 +515,7 @@ function populateLineSpacingSelect(select, currentSpacing) {
   options.forEach((spacing) => {
     const option = document.createElement("option");
     option.value = String(spacing);
-    option.textContent = `줄간격 ${formatLineSpacing(spacing)}`;
+    option.textContent = formatLineSpacing(spacing);
     select.appendChild(option);
   });
   select.value = String(current);
@@ -703,6 +704,29 @@ function setSettingsStatus(message, timeout = 2500) {
       if (settingsStatus.textContent === message) settingsStatus.textContent = "";
     }, timeout);
   }
+}
+
+async function ensureStartupEnabled() {
+  if (startupInput) startupInput.checked = true;
+  state.prefs = normalizeAppPrefs({
+    ...state.prefs,
+    startupDefaultApplied: true,
+    startupUserChoiceSet: false
+  });
+  saveState();
+
+  try {
+    const startup = await window.memoEdge.getStartup();
+    if (!startup?.openAtLogin) {
+      const result = await window.memoEdge.setStartup(true);
+      if (startupInput) startupInput.checked = true;
+      return result;
+    }
+  } catch {
+    if (startupInput) startupInput.checked = true;
+  }
+
+  return { ok: true };
 }
 
 function backupPayload() {
@@ -913,6 +937,10 @@ function renderHandles() {
   handleRail.innerHTML = "";
 
   floatingMemos().forEach((memo, index) => {
+    const slot = document.createElement("div");
+    slot.className = "handle-slot";
+    if (memo.id === state.activeId) slot.classList.add("active");
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "edge-handle";
@@ -993,7 +1021,26 @@ function renderHandles() {
 
     button.addEventListener("pointerup", endHandleDrag);
 
-    handleRail.appendChild(button);
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "handle-delete-button";
+    deleteButton.title = `${memo.title || `메모 ${index + 1}`} 삭제`;
+    deleteButton.setAttribute("aria-label", `${memo.title || `메모 ${index + 1}`} 삭제`);
+    deleteButton.textContent = "×";
+    deleteButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      draggingHandle = false;
+      handleDragState = null;
+      deleteIndex(memo.id);
+    });
+
+    slot.append(button, deleteButton);
+    handleRail.appendChild(slot);
   });
 
   const addButton = document.createElement("button");
@@ -1519,6 +1566,40 @@ function currentCellPosition(cell) {
   };
 }
 
+function buildTableGrid(table) {
+  const rows = Array.from(table?.querySelectorAll("tr") || []);
+  const grid = [];
+  const meta = new Map();
+
+  rows.forEach((row, rowIndex) => {
+    if (!grid[rowIndex]) grid[rowIndex] = [];
+    let colIndex = 0;
+
+    Array.from(row.children).forEach((cell) => {
+      while (grid[rowIndex][colIndex]) colIndex += 1;
+
+      const rowSpan = Math.max(1, cell.rowSpan || 1);
+      const colSpan = Math.max(1, cell.colSpan || 1);
+      meta.set(cell, { cell, row, rowIndex, colIndex, rowSpan, colSpan });
+
+      for (let r = rowIndex; r < rowIndex + rowSpan; r += 1) {
+        if (!grid[r]) grid[r] = [];
+        for (let c = colIndex; c < colIndex + colSpan; c += 1) {
+          grid[r][c] = cell;
+        }
+      }
+
+      colIndex += colSpan;
+    });
+  });
+
+  return { rows, grid, meta };
+}
+
+function uniqueCells(cells) {
+  return [...new Set(cells.filter(Boolean))];
+}
+
 function isEffectivelyBlankCell(cell) {
   return !String(cell?.textContent || "").trim() && !cell?.querySelector("img, table, input, .check-item");
 }
@@ -1531,46 +1612,87 @@ function moveCellContents(target, source) {
   Array.from(source.childNodes).forEach((node) => target.appendChild(node));
 }
 
-function mergeTableCells() {
-  const selected = selectedTableCells();
-  const cell = currentTableCell();
-  if (!cell) return;
+function mergeTableCellsInGroup(cells) {
+  const targets = uniqueCells(cells);
+  if (targets.length < 2) return false;
 
-  if (selected.length < 2) {
-    const nextCell = cell.nextElementSibling;
-    if (!nextCell) return;
-    moveCellContents(cell, nextCell);
-    cell.colSpan = Math.max(1, cell.colSpan || 1) + Math.max(1, nextCell.colSpan || 1);
-    nextCell.remove();
-    placeCaretInCell(cell);
-    persistEditor();
-    pushEditorHistory();
-    return;
-  }
+  const table = targets[0]?.closest(".memo-table");
+  if (!table) return false;
 
-  const positions = selected.map(currentCellPosition).filter(Boolean);
-  if (positions.length < 2) return;
+  const { grid, meta } = buildTableGrid(table);
+  const positions = targets.map((cell) => meta.get(cell)).filter(Boolean);
+  if (positions.length < 2) return false;
+
   const firstRow = Math.min(...positions.map((position) => position.rowIndex));
   const firstCol = Math.min(...positions.map((position) => position.colIndex));
-  const lastRow = Math.max(...positions.map((position) => position.rowIndex));
-  const lastCol = Math.max(...positions.map((position) => position.colIndex));
-  const primary =
-    positions.find((position) => position.rowIndex === firstRow && position.colIndex === firstCol)?.row.children[firstCol] ||
-    selected[0];
+  const lastRow = Math.max(...positions.map((position) => position.rowIndex + position.rowSpan - 1));
+  const lastCol = Math.max(...positions.map((position) => position.colIndex + position.colSpan - 1));
+  const cellsInRect = [];
 
-  selected.forEach((candidate) => {
-    if (candidate === primary) return;
-    moveCellContents(primary, candidate);
+  for (let r = firstRow; r <= lastRow; r += 1) {
+    for (let c = firstCol; c <= lastCol; c += 1) {
+      if (!grid[r]?.[c]) return false;
+      cellsInRect.push(grid[r][c]);
+    }
+  }
+
+  const mergedCells = uniqueCells(cellsInRect);
+  const primary = grid[firstRow]?.[firstCol] || targets[0];
+  mergedCells.forEach((candidate) => {
+    if (candidate !== primary) moveCellContents(primary, candidate);
   });
-  primary.rowSpan = Math.max(1, lastRow - firstRow + 1);
-  primary.colSpan = Math.max(1, lastCol - firstCol + 1);
-  selected.forEach((candidate) => {
+
+  primary.rowSpan = lastRow - firstRow + 1;
+  primary.colSpan = lastCol - firstCol + 1;
+  mergedCells.forEach((candidate) => {
     if (candidate !== primary) candidate.remove();
   });
 
   placeCaretInCell(primary);
   persistEditor();
   pushEditorHistory();
+  return true;
+}
+
+function adjacentCellsForMerge(cell, direction) {
+  const table = cell?.closest(".memo-table");
+  if (!table) return [];
+
+  const { grid, meta } = buildTableGrid(table);
+  const position = meta.get(cell);
+  if (!position) return [];
+
+  const cells = [cell];
+  if (direction === "right") {
+    const targetCol = position.colIndex + position.colSpan;
+    for (let rowIndex = position.rowIndex; rowIndex < position.rowIndex + position.rowSpan; rowIndex += 1) {
+      cells.push(grid[rowIndex]?.[targetCol]);
+    }
+  }
+
+  if (direction === "down") {
+    const targetRow = position.rowIndex + position.rowSpan;
+    for (let colIndex = position.colIndex; colIndex < position.colIndex + position.colSpan; colIndex += 1) {
+      cells.push(grid[targetRow]?.[colIndex]);
+    }
+  }
+
+  return uniqueCells(cells);
+}
+
+function mergeTableCells() {
+  const selected = selectedTableCells();
+  if (selected.length >= 2 && mergeTableCellsInGroup(selected)) return;
+
+  const cell = currentTableCell();
+  if (!cell) return;
+  mergeTableCellsInGroup(adjacentCellsForMerge(cell, "right"));
+}
+
+function mergeTableCellsDown() {
+  const cell = currentTableCell();
+  if (!cell) return;
+  mergeTableCellsInGroup(adjacentCellsForMerge(cell, "down"));
 }
 
 function splitTableCell() {
@@ -2056,19 +2178,7 @@ async function fillSettingsForm() {
   cycleShortcutInput.dataset.previousValue = cycleShortcutInput.value;
   hideShortcutInput.dataset.previousValue = hideShortcutInput.value;
   startupGuideInput.checked = state.prefs?.showLaunchGuideOnStartup !== false;
-  startupInput.checked = true;
-
-  try {
-    const startup = await window.memoEdge.getStartup();
-    if (!state.prefs?.startupUserChoiceSet && !startup.openAtLogin) {
-      const result = await window.memoEdge.setStartup(true);
-      startupInput.checked = result?.ok ? true : Boolean(startup.openAtLogin);
-    } else {
-      startupInput.checked = Boolean(startup.openAtLogin);
-    }
-  } catch {
-    startupInput.checked = true;
-  }
+  await ensureStartupEnabled();
 
   renderIndexManager();
 }
@@ -2321,8 +2431,9 @@ async function applySettings() {
     ...state.prefs,
     showLaunchGuideOnStartup: startupGuideInput.checked,
     startupDefaultApplied: true,
-    startupUserChoiceSet: true
+    startupUserChoiceSet: false
   });
+  if (startupInput) startupInput.checked = true;
 
   if (cycleShortcut.toLowerCase() === hideShortcut.toLowerCase()) {
     setSettingsStatus("두 단축키는 서로 달라야 합니다.", 0);
@@ -2344,7 +2455,7 @@ async function applySettings() {
   };
 
   const result = await window.memoEdge.updateSettings(nextShell);
-  await window.memoEdge.setStartup(startupInput.checked);
+  await ensureStartupEnabled();
   state.shell = normalizeShellSettings({ ...state.shell, ...(result.settings || nextShell) });
   state.shell.panelWidth = normalizePanelWidth(state.shell.panelWidth);
   state.shell.panelHeight = normalizePanelHeight(state.shell.panelHeight);
@@ -2455,6 +2566,10 @@ document.addEventListener("pointerdown", (event) => {
 });
 collapseButton.addEventListener("click", () => setExpanded(false));
 settingsButton.addEventListener("click", openSettings);
+deleteActiveMemoButton?.addEventListener("click", () => {
+  const memo = activeMemo();
+  if (memo) deleteIndex(memo.id);
+});
 closeSettingsButton.addEventListener("click", closeSettings);
 allMemosButton.addEventListener("click", () => setMemoListOpen(memoListPanel.classList.contains("hidden")));
 closeMemoListButton.addEventListener("click", () => setMemoListOpen(false));
@@ -2518,6 +2633,7 @@ addTableColButton?.addEventListener("click", addTableColumn);
 deleteTableRowButton?.addEventListener("click", deleteTableRow);
 deleteTableColButton?.addEventListener("click", deleteTableColumn);
 mergeTableCellsButton?.addEventListener("click", mergeTableCells);
+mergeTableDownButton?.addEventListener("click", mergeTableCellsDown);
 splitTableCellButton?.addEventListener("click", splitTableCell);
 tableBorderColorInput?.addEventListener("input", applyTableBorder);
 tableBorderWidthInput?.addEventListener("input", applyTableBorder);
@@ -2593,19 +2709,7 @@ async function initialize() {
   state.prefs = normalizeAppPrefs(state.prefs);
   await applyWelcomeMemoIfNeeded();
 
-  try {
-    const startup = await window.memoEdge.getStartup();
-    if (!state.prefs.startupUserChoiceSet && !startup.openAtLogin) {
-      const result = await window.memoEdge.setStartup(true);
-      state.prefs.startupDefaultApplied = true;
-      if (startupInput) startupInput.checked = result?.ok ? true : Boolean(startup.openAtLogin);
-    } else if (startupInput) {
-      state.prefs.startupDefaultApplied = true;
-      startupInput.checked = Boolean(startup.openAtLogin);
-    }
-  } catch {
-    if (startupInput) startupInput.checked = true;
-  }
+  await ensureStartupEnabled();
 
   if (startupGuideInput) startupGuideInput.checked = state.prefs.showLaunchGuideOnStartup;
   syncShellLayoutClasses();

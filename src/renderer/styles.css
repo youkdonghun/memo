@@ -10,6 +10,10 @@
   --memo-font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --memo-font-size: 15px;
   --memo-line-height: 1;
+  --radius-panel: 22px;
+  --radius-control: 10px;
+  --radius-compact: 9px;
+  --radius-soft: 12px;
 }
 
 * {
@@ -82,11 +86,32 @@ button {
   padding: 4px 8px 4px 28px;
 }
 
-.edge-handle {
+.handle-slot {
+  position: relative;
   width: 28px;
   min-height: 64px;
   max-height: 112px;
   flex: 1 1 72px;
+  display: flex;
+}
+
+.dock-top .handle-slot,
+.dock-bottom .handle-slot {
+  width: auto;
+  min-width: 72px;
+  max-width: 112px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  flex: 1 1 72px;
+}
+
+.edge-handle {
+  width: 100%;
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -94,7 +119,7 @@ button {
   gap: 1px;
   padding: 7px 2px;
   border: 1px solid rgba(36, 42, 58, 0.18);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 12px 12px 0;
   background: var(--handle-bg, var(--note-bg));
   color: var(--handle-text, var(--note-text));
   box-shadow: 0 10px 28px rgba(28, 35, 50, 0.16);
@@ -113,32 +138,32 @@ button {
 }
 
 .dock-right .edge-handle {
-  border-radius: 8px 0 0 8px;
+  border-radius: 12px 0 0 12px;
 }
 
 .dock-left .edge-handle {
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 12px 12px 0;
 }
 
 .dock-top .edge-handle,
 .dock-bottom .edge-handle {
-  width: auto;
-  min-width: 72px;
-  max-width: 112px;
-  height: 28px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
   min-height: 28px;
   max-height: 28px;
-  flex: 1 1 72px;
+  flex: 1 1 auto;
   flex-direction: row;
   padding: 2px 7px;
 }
 
 .dock-top .edge-handle {
-  border-radius: 8px 8px 0 0;
+  border-radius: 12px 12px 0 0;
 }
 
 .dock-bottom .edge-handle {
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 12px 12px;
 }
 
 .handle-char {
@@ -155,6 +180,51 @@ button {
 .edge-handle.active {
   border-color: var(--accent);
   box-shadow: 0 12px 30px rgba(28, 35, 50, 0.24);
+}
+
+.handle-delete-button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(194, 53, 53, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #c23535;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.86);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.handle-slot:hover .handle-delete-button,
+.handle-slot:focus-within .handle-delete-button {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.dock-right .handle-delete-button {
+  right: auto;
+  left: -5px;
+}
+
+.dock-top .handle-delete-button,
+.dock-bottom .handle-delete-button {
+  top: -6px;
+  right: -6px;
+  left: auto;
 }
 
 .add-handle-button {
@@ -198,7 +268,7 @@ button {
   flex-direction: column;
   background: var(--note-bg);
   border-left: 1px solid var(--line);
-  border-radius: 0 18px 18px 0;
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
   box-shadow: -18px 0 36px rgba(23, 29, 42, 0.16);
   overflow: hidden;
 }
@@ -206,13 +276,13 @@ button {
 .dock-right .memo-panel {
   border-left: 1px solid var(--line);
   border-right: 0;
-  border-radius: 0 18px 18px 0;
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
 }
 
 .dock-left .memo-panel {
   border-left: 0;
   border-right: 1px solid var(--line);
-  border-radius: 18px 0 0 18px;
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
   box-shadow: 18px 0 36px rgba(23, 29, 42, 0.16);
 }
 
@@ -226,13 +296,13 @@ button {
 .dock-top .memo-panel {
   border-top: 0;
   border-bottom: 1px solid var(--line);
-  border-radius: 0 0 18px 18px;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
 
 .dock-bottom .memo-panel {
   border-top: 1px solid var(--line);
   border-bottom: 0;
-  border-radius: 18px 18px 0 0;
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
 }
 
 .app-shell.expanded .memo-panel {
@@ -286,7 +356,7 @@ button {
   width: 245px;
   height: 28px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 0 8px;
   background: rgba(255, 255, 255, 0.68);
   color: var(--note-text);
@@ -310,7 +380,7 @@ button {
   height: 26px;
   padding: 0 9px;
   border: 1px solid rgba(34, 42, 64, 0.16);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: rgba(255, 255, 255, 0.56);
   color: var(--note-text);
   cursor: pointer;
@@ -344,12 +414,16 @@ button {
 .icon-button {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
+}
+
+.icon-button.danger {
+  color: #c23535;
 }
 
 .small-button {
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 0 10px;
   font-size: 12px;
   font-weight: 800;
@@ -386,7 +460,7 @@ button {
 .tool-button {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: var(--radius-compact);
   font-size: 13px;
 }
 
@@ -406,7 +480,7 @@ button {
   max-width: 220px;
   height: 28px;
   border: 1px solid rgba(34, 42, 64, 0.16);
-  border-radius: 7px;
+  border-radius: var(--radius-compact);
   padding: 0 24px 0 8px;
   background: rgba(255, 255, 255, 0.62);
   color: var(--note-text);
@@ -455,7 +529,7 @@ button {
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(34, 42, 64, 0.15);
-  border-radius: 7px;
+  border-radius: var(--radius-compact);
   background: rgba(255, 255, 255, 0.58);
   color: var(--note-text);
   cursor: pointer;
@@ -478,7 +552,7 @@ button {
   align-items: center;
   gap: 8px;
   border: 1px solid rgba(34, 42, 64, 0.12);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 6px 8px;
   background: rgba(255, 255, 255, 0.54);
   color: var(--note-text);
@@ -569,7 +643,7 @@ button {
   height: 26px;
   padding: 0;
   border: 1px solid rgba(34, 42, 64, 0.16);
-  border-radius: 7px;
+  border-radius: var(--radius-compact);
   background: rgba(255, 255, 255, 0.62);
   cursor: pointer;
 }
@@ -578,7 +652,7 @@ button {
   width: 42px;
   height: 28px;
   border: 1px solid rgba(34, 42, 64, 0.16);
-  border-radius: 7px;
+  border-radius: var(--radius-compact);
   padding: 0 6px;
   background: rgba(255, 255, 255, 0.62);
   color: var(--note-text);
@@ -599,7 +673,7 @@ button {
   width: 52px;
   height: 28px;
   border: 1px solid rgba(34, 42, 64, 0.16);
-  border-radius: 7px;
+  border-radius: var(--radius-compact);
   padding: 0 6px;
   background: rgba(255, 255, 255, 0.68);
   color: var(--note-text);
@@ -680,20 +754,7 @@ button {
 }
 
 .panel-resize-height::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: 3px;
-  width: 58px;
-  height: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--note-text) 24%, transparent);
-  transform: translateX(-50%);
-}
-
-.panel-resize-height:hover::before,
-.panel-resize-height.resizing::before {
-  background: color-mix(in srgb, var(--accent) 68%, transparent);
+  display: none;
 }
 
 .panel-resize-width {
@@ -714,20 +775,7 @@ button {
 }
 
 .panel-resize-width::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 3px;
-  width: 3px;
-  height: 58px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--note-text) 20%, transparent);
-  transform: translateY(-50%);
-}
-
-.panel-resize-width:hover::before,
-.panel-resize-width.resizing::before {
-  background: color-mix(in srgb, var(--accent) 68%, transparent);
+  display: none;
 }
 
 .panel-resize-corner {
@@ -754,27 +802,7 @@ button {
 }
 
 .panel-resize-corner::before {
-  content: "";
-  position: absolute;
-  inset: 4px;
-  border-right: 3px solid color-mix(in srgb, var(--note-text) 22%, transparent);
-  border-bottom: 3px solid color-mix(in srgb, var(--note-text) 22%, transparent);
-  border-radius: 2px;
-}
-
-.dock-right .panel-resize-corner::before {
-  border-right: 0;
-  border-left: 3px solid color-mix(in srgb, var(--note-text) 22%, transparent);
-}
-
-.dock-bottom .panel-resize-corner::before {
-  border-bottom: 0;
-  border-top: 3px solid color-mix(in srgb, var(--note-text) 22%, transparent);
-}
-
-.panel-resize-corner:hover::before,
-.panel-resize-corner.resizing::before {
-  border-color: color-mix(in srgb, var(--accent) 68%, transparent);
+  display: none;
 }
 
 .app-shell.settings-open .panel-resize-grip {
@@ -798,7 +826,7 @@ button {
   overflow: auto;
   background: #f8fafc;
   border-left: 1px solid rgba(34, 42, 64, 0.12);
-  border-radius: 0 18px 18px 0;
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
   color: #273047;
   font-family: var(--common-font-family);
   z-index: 5;
@@ -808,14 +836,14 @@ button {
   inset: 0 0 0 var(--collapsed-width);
   border-left: 1px solid rgba(34, 42, 64, 0.12);
   border-right: 0;
-  border-radius: 0 18px 18px 0;
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
 }
 
 .dock-left .settings-pane {
   inset: 0 var(--collapsed-width) 0 0;
   border-left: 0;
   border-right: 1px solid rgba(34, 42, 64, 0.12);
-  border-radius: 18px 0 0 18px;
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 
 .dock-top .settings-pane {
@@ -823,7 +851,7 @@ button {
   border-left: 0;
   border-top: 0;
   border-bottom: 1px solid rgba(34, 42, 64, 0.12);
-  border-radius: 0 0 18px 18px;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
 
 .dock-bottom .settings-pane {
@@ -831,7 +859,7 @@ button {
   border-left: 0;
   border-top: 1px solid rgba(34, 42, 64, 0.12);
   border-bottom: 0;
-  border-radius: 18px 18px 0 0;
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
 }
 
 .settings-pane input,
@@ -881,7 +909,7 @@ button {
   gap: 10px;
   padding: 12px;
   border: 1px solid rgba(34, 42, 64, 0.1);
-  border-radius: 8px;
+  border-radius: var(--radius-soft);
   background: #ffffff;
 }
 
@@ -890,6 +918,7 @@ button {
 }
 
 .field {
+  min-width: 0;
   display: grid;
   gap: 6px;
   font-size: 12px;
@@ -901,7 +930,7 @@ button {
   width: 100%;
   height: 34px;
   border: 1px solid rgba(34, 42, 64, 0.18);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 0 10px;
   background: #fff;
   color: #273047;
@@ -910,9 +939,19 @@ button {
 
 .default-fields {
   display: grid;
-  grid-template-columns: 1fr 116px 136px;
-  gap: 10px;
+  grid-template-columns: minmax(128px, 1.25fr) minmax(84px, 0.8fr) minmax(84px, 0.8fr);
+  gap: 8px;
   align-items: end;
+}
+
+.default-fields .field {
+  font-size: 11px;
+}
+
+.default-fields .field select {
+  padding: 0 24px 0 10px;
+  font-family: var(--common-font-family);
+  font-weight: 700;
 }
 
 .window-placement-fields {
@@ -960,7 +999,7 @@ button {
 .primary-button {
   min-height: 38px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--accent);
   color: #fff;
   font-weight: 800;
@@ -977,7 +1016,7 @@ button {
   gap: 8px;
   padding: 10px;
   border: 1px solid rgba(34, 42, 64, 0.12);
-  border-radius: 8px;
+  border-radius: var(--radius-soft);
   background: #fbfcfe;
 }
 
@@ -996,7 +1035,7 @@ button {
   min-width: 0;
   height: 32px;
   border: 1px solid rgba(34, 42, 64, 0.14);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 0 10px;
   background: #fff;
   color: #273047;
@@ -1022,7 +1061,7 @@ button {
   width: 28px;
   height: 28px;
   border: 1px solid rgba(34, 42, 64, 0.16);
-  border-radius: 7px;
+  border-radius: var(--radius-compact);
   background: #fff;
   color: #34405a;
   cursor: pointer;
@@ -1038,7 +1077,7 @@ button {
 .detach-index-button,
 .delete-index-button {
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: #fff;
   cursor: pointer;
   font-size: 12px;
@@ -1080,7 +1119,7 @@ button {
   height: 26px;
   padding: 0;
   border: 1px solid rgba(34, 42, 64, 0.18);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: #fff;
   cursor: pointer;
 }
@@ -1105,7 +1144,7 @@ button {
   height: 30px;
   min-width: 0;
   border: 1px solid rgba(34, 42, 64, 0.14);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 0 8px;
   background: #fff;
   color: #273047;
@@ -1132,7 +1171,7 @@ button {
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(34, 42, 64, 0.25);
-  border-radius: 6px;
+  border-radius: var(--radius-compact);
   background: rgba(255, 255, 255, 0.5);
   cursor: pointer;
   font-size: 13px;
@@ -1168,7 +1207,7 @@ button {
   gap: 12px;
   padding: 18px;
   border: 1px solid rgba(34, 42, 64, 0.14);
-  border-radius: 14px;
+  border-radius: 18px;
   background: #ffffff;
   box-shadow: 0 20px 54px rgba(23, 29, 42, 0.24);
   color: #273047;
@@ -1195,7 +1234,7 @@ button {
 .launch-guide-shortcuts span {
   display: block;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: #f4f7fb;
   color: #273047;
   font-size: 12px;

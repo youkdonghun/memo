@@ -341,6 +341,12 @@ function displayInfos() {
   }));
 }
 
+function loginItemOptions() {
+  return app.isPackaged
+    ? { path: process.execPath, args: [] }
+    : { path: process.execPath, args: [app.getAppPath()] };
+}
+
 function setExpanded(nextExpanded, notifyRenderer = true) {
   expanded = Boolean(nextExpanded);
   if (!expanded) settingsOpen = false;
@@ -738,7 +744,7 @@ ipcMain.handle("user:get-name", () => {
 
 ipcMain.handle("startup:get", () => {
   try {
-    const login = app.getLoginItemSettings({ path: process.execPath, args: [] });
+    const login = app.getLoginItemSettings(loginItemOptions());
     return { ok: true, openAtLogin: Boolean(login.openAtLogin) };
   } catch (error) {
     return { ok: false, openAtLogin: false, message: String(error?.message || error) };
@@ -749,8 +755,7 @@ ipcMain.handle("startup:set", (_, enabled) => {
   try {
     app.setLoginItemSettings({
       openAtLogin: Boolean(enabled),
-      path: process.execPath,
-      args: []
+      ...loginItemOptions()
     });
     return { ok: true };
   } catch (error) {

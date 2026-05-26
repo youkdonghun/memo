@@ -5,6 +5,8 @@
   --memo-font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --memo-font-size: 15px;
   --memo-line-height: 1.5;
+  --radius-control: 10px;
+  --radius-compact: 9px;
 }
 
 * {
@@ -60,7 +62,7 @@ input {
   flex: 1 1 auto;
   height: 32px;
   border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 0 10px;
   background: rgba(255, 255, 255, 0.68);
   color: var(--note-text);
@@ -72,7 +74,7 @@ input {
 .attach-button {
   height: 32px;
   border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 0 12px;
   background: rgba(255, 255, 255, 0.66);
   color: var(--note-text);
@@ -131,7 +133,7 @@ input {
   align-items: center;
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--note-text) 25%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-compact);
   background: rgba(255, 255, 255, 0.5);
   cursor: pointer;
   font-size: 13px;
