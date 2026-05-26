@@ -109,17 +109,19 @@
       </section>
 
       <aside id="settingsPane" class="settings-pane" aria-label="설정">
-        <header class="settings-header">
-          <div>
-            <h2>설정</h2>
-            <p>플로팅 메모는 최대 5개까지 화면에 고정됩니다.</p>
-          </div>
-          <button id="closeSettingsButton" class="icon-button" type="button" title="닫기">×</button>
-        </header>
+        <div class="settings-sticky-top">
+          <header class="settings-header">
+            <div>
+              <h2>설정</h2>
+              <p>플로팅 메모는 최대 5개까지 화면에 고정됩니다.</p>
+            </div>
+            <button id="closeSettingsButton" class="icon-button" type="button" title="닫기">×</button>
+          </header>
 
-        <div class="settings-action-bar">
-          <button id="applySettingsButton" class="primary-button" type="button">적용</button>
-          <p id="settingsStatus" class="settings-status"></p>
+          <div class="settings-action-bar">
+            <button id="applySettingsButton" class="primary-button" type="button">적용</button>
+            <p id="settingsStatus" class="settings-status"></p>
+          </div>
         </div>
 
         <section class="settings-section">

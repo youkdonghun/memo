@@ -25,7 +25,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -48,6 +49,23 @@ input {
 
 .detached-header {
   border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+}
+
+.detached-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+}
+
+.detached-toolbar-row {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
 }
 
 .detached-footer {
@@ -84,6 +102,125 @@ input {
   white-space: nowrap;
 }
 
+.small-button,
+.tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: var(--radius-compact);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--note-text);
+  cursor: pointer;
+}
+
+.small-button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.small-button.danger,
+.tool-button.danger {
+  color: #c23535;
+}
+
+.tool-button {
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+}
+
+.tool-button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, rgba(255, 255, 255, 0.66));
+}
+
+.toolbar-select,
+.toolbar-size-select,
+.toolbar-line-select {
+  height: 28px;
+  min-width: 92px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: var(--radius-compact);
+  padding: 0 24px 0 8px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--note-text);
+  font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+}
+
+.toolbar-select {
+  flex: 1 1 160px;
+}
+
+.toolbar-size-select {
+  flex: 0 0 76px;
+}
+
+.toolbar-line-select {
+  flex: 0 0 84px;
+}
+
+.table-picker,
+.table-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+  background: color-mix(in srgb, var(--note-bg) 82%, #ffffff);
+}
+
+.table-picker.hidden,
+.table-tools.hidden {
+  display: none;
+}
+
+.table-tools > span {
+  color: color-mix(in srgb, var(--note-text) 68%, transparent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.table-picker label,
+.table-style-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--note-text);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.table-picker input,
+.table-style-field input[type="number"] {
+  width: 52px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: var(--radius-compact);
+  padding: 0 6px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--note-text);
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+}
+
+.table-style-field input[type="color"] {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: var(--radius-compact);
+  background: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+}
+
 .detached-editor {
   flex: 1;
   min-height: 0;
@@ -115,6 +252,11 @@ input {
   padding: 6px 8px;
   background: rgba(255, 255, 255, 0.34);
   vertical-align: top;
+}
+
+.memo-table td:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  outline-offset: -2px;
 }
 
 .check-item {

@@ -3,15 +3,73 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MEMO BOM</title>
+    <title>MEMO BOM 팝업</title>
     <link rel="stylesheet" href="./detached.css" />
   </head>
   <body>
     <main class="detached-shell">
       <header class="detached-header">
         <input id="detachedTitleInput" class="detached-title" type="text" maxlength="80" />
-        <button id="attachMemoButton" class="attach-button" type="button">합치기</button>
+        <button id="attachMemoButton" class="attach-button" type="button">돌아가기</button>
       </header>
+      <div class="detached-toolbar" aria-label="서식 도구">
+        <div class="detached-toolbar-row">
+          <select id="fontFamilySelect" class="toolbar-select" title="글씨체 변경" aria-label="글씨체 변경"></select>
+          <select id="fontSizeSelect" class="toolbar-size-select" title="글씨 크기" aria-label="글씨 크기"></select>
+          <select id="lineSpacingSelect" class="toolbar-line-select" title="줄간격" aria-label="줄간격"></select>
+        </div>
+        <div class="detached-toolbar-row">
+          <button id="undoButton" class="tool-button" type="button" title="되돌리기">↶</button>
+          <button id="redoButton" class="tool-button" type="button" title="다시하기">↷</button>
+          <button class="tool-button" type="button" data-command="bold" title="굵게"><b>B</b></button>
+          <button class="tool-button" type="button" data-command="italic" title="기울임"><i>I</i></button>
+          <button class="tool-button" type="button" data-command="underline" title="밑줄"><u>U</u></button>
+          <button id="bulletButton" class="tool-button" type="button" title="목록">•</button>
+          <button id="checkButton" class="tool-button" type="button" title="체크">☐</button>
+          <button id="tableButton" class="tool-button" type="button" title="표 삽입">표</button>
+          <button id="clearButton" class="tool-button danger" type="button" title="전체 삭제">⌫</button>
+        </div>
+      </div>
+      <div id="tablePicker" class="table-picker hidden" aria-label="표 삽입">
+        <label>
+          <span>행</span>
+          <input id="tableRowsInput" type="number" min="1" max="12" value="3" />
+        </label>
+        <label>
+          <span>열</span>
+          <input id="tableColsInput" type="number" min="1" max="8" value="3" />
+        </label>
+        <button id="insertTableButton" class="small-button" type="button">삽입</button>
+        <button id="cancelTableButton" class="small-button" type="button">닫기</button>
+      </div>
+      <div id="tableTools" class="table-tools hidden" aria-label="표 편집">
+        <span>표 편집</span>
+        <button id="addTableRowButton" class="small-button" type="button">행 추가</button>
+        <button id="addTableColButton" class="small-button" type="button">열 추가</button>
+        <button id="deleteTableRowButton" class="small-button" type="button">행 삭제</button>
+        <button id="deleteTableColButton" class="small-button" type="button">열 삭제</button>
+        <button id="mergeTableCellsButton" class="small-button" type="button">셀 병합</button>
+        <button id="mergeTableDownButton" class="small-button" type="button">아래 병합</button>
+        <button id="splitTableCellButton" class="small-button" type="button">셀 분할</button>
+        <label class="table-style-field">
+          <span>테두리</span>
+          <input id="tableBorderColorInput" type="color" value="#6b7280" />
+        </label>
+        <label class="table-style-field compact">
+          <span>굵기</span>
+          <input id="tableBorderWidthInput" type="number" min="0" max="8" step="1" value="1" />
+        </label>
+        <label class="table-style-field">
+          <span>셀 색</span>
+          <input id="tableCellColorInput" type="color" value="#ffffff" />
+        </label>
+        <label class="table-style-field">
+          <span>표 색</span>
+          <input id="tableFillColorInput" type="color" value="#ffffff" />
+        </label>
+        <button id="clearTableCellColorButton" class="small-button" type="button">색 지움</button>
+        <button id="deleteTableButton" class="small-button danger" type="button">표 삭제</button>
+      </div>
       <div id="detachedEditor" class="detached-editor" contenteditable="true" spellcheck="false"></div>
       <footer class="detached-footer">
         <span id="detachedSaveStatus">저장됨</span>

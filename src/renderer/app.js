@@ -20,7 +20,7 @@ const CHECK_TEXT_PLACEHOLDER = "\u200b";
 const HANDLE_TITLE_PREFIX_LENGTH = 5;
 const FONT_SIZE_OPTIONS = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32];
 const LINE_SPACING_OPTIONS = [1, 1.15, 1.5, 2, 2.5, 3];
-const HANDLE_REORDER_THRESHOLD = 18;
+const HANDLE_REORDER_THRESHOLD = 8;
 
 const FONT_LABELS = {
   Gulim: "굴림체",
@@ -40,7 +40,6 @@ const COLOR_PRESETS = [
   "#ffd9e8",
   "#ddeaff",
   "#dcf5de",
-  "#f4e1ff",
   "#ffe3c2",
   "#d7f4f0",
   "#e6e9ff",
@@ -140,6 +139,7 @@ let resizeFrame = null;
 let savedEditorRange = null;
 let handleDragState = null;
 let lastTableCell = null;
+let detachedMemoPlacements = new Map();
 
 const appShell = document.getElementById("appShell");
 const handleRail = document.getElementById("handleRail");
@@ -808,6 +808,7 @@ async function applyImportedState(imported) {
     welcomeMemoApplied: true
   });
   state = nextState;
+  detachedMemoPlacements = new Map();
   saveState();
   renderActiveMemo();
   applyCommonTypography();
@@ -925,9 +926,71 @@ function renderHandleLabel(button, text) {
   });
 }
 
+function clearHandleDropPreview() {
+  handleRail.querySelectorAll(".handle-slot").forEach((slot) => {
+    slot.classList.remove("dragging", "drop-before", "drop-after");
+    slot.style.transform = "";
+  });
+}
+
+function handleDropIndexFromPointer(pointerAlong) {
+  const slots = Array.from(handleRail.querySelectorAll(".handle-slot")).filter((slot) => slot !== handleDragState?.slot);
+  if (!slots.length) return handleDragState?.originalIndex ?? -1;
+
+  const centers = slots.map((slot) => {
+    const rect = slot.getBoundingClientRect();
+    return isHorizontalDock() ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+  });
+
+  return centers.filter((center) => pointerAlong > center).length;
+}
+
+function updateHandleDropPreview(targetIndex) {
+  const slots = Array.from(handleRail.querySelectorAll(".handle-slot"));
+  const otherSlots = slots.filter((slot) => slot !== handleDragState?.slot);
+  slots.forEach((slot) => slot.classList.remove("drop-before", "drop-after"));
+  if (!otherSlots.length || targetIndex < 0 || targetIndex === handleDragState?.originalIndex) return;
+
+  const clampedIndex = clamp(targetIndex, 0, slots.length - 1);
+  if (clampedIndex > handleDragState.originalIndex) {
+    const previousSlot = otherSlots[Math.min(clampedIndex - 1, otherSlots.length - 1)];
+    previousSlot?.classList.add("drop-after");
+    return;
+  }
+
+  const nextSlot = otherSlots[Math.min(clampedIndex, otherSlots.length - 1)];
+  nextSlot?.classList.add("drop-before");
+}
+
+function moveFloatingMemoToIndex(id, nextIndex) {
+  const currentIndex = state.floatingIds.indexOf(id);
+  if (currentIndex < 0) return false;
+  const clampedIndex = clamp(Math.round(nextIndex), 0, state.floatingIds.length - 1);
+  if (currentIndex === clampedIndex) return false;
+
+  const nextIds = [...state.floatingIds];
+  const [moved] = nextIds.splice(currentIndex, 1);
+  nextIds.splice(clampedIndex, 0, moved);
+  state.floatingIds = nextIds;
+  renderHandles();
+  renderAllMemoList();
+  renderIndexManager();
+  saveState();
+  return true;
+}
+
 function endHandleDrag() {
   if (!handleDragState && !draggingHandle) return;
+  const pendingState = handleDragState;
   handleDragState = null;
+  clearHandleDropPreview();
+  if (
+    pendingState?.reorderIndex >= 0 &&
+    pendingState.reorderIndex !== pendingState.originalIndex &&
+    !pendingState.detached
+  ) {
+    moveFloatingMemoToIndex(pendingState.id, pendingState.reorderIndex);
+  }
   setTimeout(() => {
     draggingHandle = false;
   }, 0);
@@ -968,13 +1031,18 @@ function renderHandles() {
     button.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       draggingHandle = false;
+      const startAlong = isHorizontalDock() ? event.clientX : event.clientY;
       handleDragState = {
         id: memo.id,
-        floatingIndex: state.floatingIds.indexOf(memo.id),
+        slot,
+        button,
+        originalIndex: state.floatingIds.indexOf(memo.id),
+        reorderIndex: state.floatingIds.indexOf(memo.id),
         startX: event.screenX,
         startY: event.screenY,
-        lastAlong: isHorizontalDock() ? event.clientX : event.clientY,
-        reorderCarry: 0,
+        startAlong,
+        lastAlong: startAlong,
+        moved: false,
         detached: false
       };
       button.setPointerCapture(event.pointerId);
@@ -996,26 +1064,28 @@ function renderHandles() {
       if (awayDistance > DETACH_DRAG_THRESHOLD) {
         draggingHandle = true;
         handleDragState.detached = true;
+        clearHandleDropPreview();
         detachMemoToWindow(memo.id);
         return;
       }
       const currentPosition = isHorizontalDock() ? event.clientX : event.clientY;
+      const totalDelta = currentPosition - handleDragState.startAlong;
       const delta = currentPosition - handleDragState.lastAlong;
-      if (Math.abs(delta) < 4) return;
-      draggingHandle = true;
       handleDragState.lastAlong = currentPosition;
       if (state.floatingIds.length > 1) {
-        handleDragState.reorderCarry += delta;
-        if (Math.abs(handleDragState.reorderCarry) >= HANDLE_REORDER_THRESHOLD) {
-          const direction = handleDragState.reorderCarry > 0 ? 1 : -1;
-          const moved = moveFloatingMemo(memo.id, direction);
-          if (moved) {
-            handleDragState.floatingIndex = state.floatingIds.indexOf(memo.id);
-            handleDragState.reorderCarry = 0;
-          }
-        }
+        if (Math.abs(totalDelta) < HANDLE_REORDER_THRESHOLD && !handleDragState.moved) return;
+        draggingHandle = true;
+        handleDragState.moved = true;
+        handleDragState.slot.classList.add("dragging");
+        handleDragState.slot.style.transform = isHorizontalDock()
+          ? `translateX(${totalDelta}px)`
+          : `translateY(${totalDelta}px)`;
+        handleDragState.reorderIndex = handleDropIndexFromPointer(currentPosition);
+        updateHandleDropPreview(handleDragState.reorderIndex);
         return;
       }
+      if (Math.abs(delta) < 4) return;
+      draggingHandle = true;
       nudgeShellPosition(delta);
     });
 
@@ -1079,12 +1149,32 @@ async function detachMemoToWindow(id) {
   const memo = state.indexes.find((item) => item.id === id);
   if (!memo || !window.memoEdge.detachMemo) return;
   if (memo.id === state.activeId) persistEditor();
-  const result = await window.memoEdge.detachMemo(memoPayload(memo));
-  if (!result?.ok) return;
 
-  if (state.floatingIds.length > 1) {
+  const floatingIndex = state.floatingIds.indexOf(id);
+  const wasFloating = floatingIndex >= 0;
+  detachedMemoPlacements.set(id, {
+    wasFloating,
+    floatingIndex: wasFloating ? floatingIndex : -1,
+    wasActive: state.activeId === id,
+    memoIndex: state.indexes.findIndex((item) => item.id === id)
+  });
+
+  const result = await window.memoEdge.detachMemo(memoPayload(memo));
+  if (!result?.ok) {
+    detachedMemoPlacements.delete(id);
+    return;
+  }
+
+  if (wasFloating) {
     state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
     if (state.activeId === id) state.activeId = state.floatingIds[0];
+  }
+
+  if (state.activeId === id && state.indexes.length > 1) {
+    const replacementMemo =
+      state.floatingIds.map((floatingId) => state.indexes.find((item) => item.id === floatingId)).find(Boolean) ||
+      state.indexes.find((item) => item.id !== id);
+    if (replacementMemo) state.activeId = replacementMemo.id;
   }
 
   renderActiveMemo();
@@ -1120,14 +1210,28 @@ function applyDetachedMemoUpdate(payload) {
 function reattachDetachedMemo(id) {
   const memo = state.indexes.find((item) => item.id === id);
   if (!memo) return;
-  if (!state.floatingIds.includes(id)) {
-    if (state.floatingIds.length >= MAX_FLOATING) state.floatingIds.pop();
+  const placement = detachedMemoPlacements.get(id);
+  detachedMemoPlacements.delete(id);
+
+  if (placement?.wasFloating) {
+    state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
+    if (state.floatingIds.length >= MAX_FLOATING) {
+      state.floatingIds = state.floatingIds.slice(0, MAX_FLOATING - 1);
+    }
+    const insertIndex = clamp(placement.floatingIndex, 0, state.floatingIds.length);
+    state.floatingIds.splice(insertIndex, 0, id);
+  } else if (placement) {
+    state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
+  } else if (!state.floatingIds.includes(id) && state.floatingIds.length < MAX_FLOATING) {
     state.floatingIds.push(id);
   }
-  state.activeId = id;
+
+  if (placement?.wasActive || !state.floatingIds.length || state.activeId === id) {
+    state.activeId = id;
+  }
   renderActiveMemo();
   saveState();
-  setExpanded(true);
+  if (placement?.wasFloating || placement?.wasActive || !placement) setExpanded(true);
 }
 
 function renderActiveMemo() {
@@ -2246,7 +2350,8 @@ function renderIndexManager() {
     const detachButton = document.createElement("button");
     detachButton.type = "button";
     detachButton.className = "detach-index-button";
-    detachButton.textContent = "분리";
+    detachButton.textContent = "팝업";
+    detachButton.title = "팝업으로 열기";
     detachButton.addEventListener("click", () => detachMemoToWindow(memo.id));
 
     const deleteButton = document.createElement("button");
@@ -2390,6 +2495,7 @@ function updateMemoTypography(id, partial) {
 }
 
 function deleteIndex(id) {
+  detachedMemoPlacements.delete(id);
   if (state.indexes.length <= 1) {
     const memo = state.indexes[0];
     memo.title = "메모 1";
