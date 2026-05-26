@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MEMO BOM</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="appShell" class="app-shell">
+      <nav id="handleRail" class="handle-rail" aria-label="플로팅 메모"></nav>
+
+      <section id="panel" class="memo-panel" aria-label="메모 패널">
+        <header class="panel-header">
+          <div class="title-block">
+            <button id="activeTitleButton" class="active-title-button" type="button" title="제목 수정">
+              <span id="activeLabel" class="active-label">메모 1</span>
+            </button>
+            <input id="activeTitleInput" class="active-title-input hidden" type="text" maxlength="80" />
+            <button id="allMemosButton" class="memo-list-button" type="button">전체 메모</button>
+            <p id="activeSubtitle" class="active-subtitle"></p>
+          </div>
+          <div class="header-actions">
+            <button id="settingsButton" class="icon-button" type="button" title="설정">⚙</button>
+            <button id="collapseButton" class="icon-button" type="button" title="접기">›</button>
+          </div>
+        </header>
+
+        <div class="toolbar" aria-label="서식 도구">
+          <div class="toolbar-row primary">
+            <select id="fontFamilyToolbarSelect" class="toolbar-select" title="글씨체 변경" aria-label="글씨체 변경"></select>
+            <select id="fontSizeToolbarSelect" class="toolbar-size-select" title="글씨 크기" aria-label="글씨 크기"></select>
+            <select id="lineSpacingToolbarSelect" class="toolbar-line-select" title="줄간격" aria-label="줄간격"></select>
+          </div>
+          <div class="toolbar-row secondary">
+            <button id="undoButton" class="tool-button" type="button" title="되돌리기">↶</button>
+            <button id="redoButton" class="tool-button" type="button" title="다시하기">↷</button>
+            <button class="tool-button" type="button" data-command="bold" title="굵게"><b>B</b></button>
+            <button class="tool-button" type="button" data-command="italic" title="기울임"><i>I</i></button>
+            <button class="tool-button" type="button" data-command="underline" title="밑줄"><u>U</u></button>
+            <button id="bulletButton" class="tool-button" type="button" title="목록">•</button>
+            <button id="checkButton" class="tool-button" type="button" title="체크">☐</button>
+            <button id="tableButton" class="tool-button" type="button" title="표 삽입">표</button>
+            <button id="clearButton" class="tool-button danger" type="button" title="전체 삭제">⌫</button>
+          </div>
+        </div>
+
+        <div id="tablePicker" class="table-picker hidden" aria-label="표 삽입">
+          <label>
+            <span>행</span>
+            <input id="tableRowsInput" type="number" min="1" max="12" value="3" />
+          </label>
+          <label>
+            <span>열</span>
+            <input id="tableColsInput" type="number" min="1" max="8" value="3" />
+          </label>
+          <button id="insertTableButton" class="small-button" type="button">삽입</button>
+          <button id="cancelTableButton" class="small-button" type="button">닫기</button>
+        </div>
+
+        <div id="tableTools" class="table-tools hidden" aria-label="표 편집">
+          <span>표 편집</span>
+          <button id="addTableRowButton" class="small-button" type="button">행 추가</button>
+          <button id="addTableColButton" class="small-button" type="button">열 추가</button>
+          <button id="deleteTableRowButton" class="small-button" type="button">행 삭제</button>
+          <button id="deleteTableColButton" class="small-button" type="button">열 삭제</button>
+          <button id="mergeTableCellsButton" class="small-button" type="button">셀 병합</button>
+          <button id="splitTableCellButton" class="small-button" type="button">셀 분할</button>
+          <label class="table-style-field">
+            <span>테두리</span>
+            <input id="tableBorderColorInput" type="color" value="#6b7280" />
+          </label>
+          <label class="table-style-field compact">
+            <span>굵기</span>
+            <input id="tableBorderWidthInput" type="number" min="0" max="8" step="1" value="1" />
+          </label>
+          <label class="table-style-field">
+            <span>셀 색</span>
+            <input id="tableCellColorInput" type="color" value="#ffffff" />
+          </label>
+          <label class="table-style-field">
+            <span>표 색</span>
+            <input id="tableFillColorInput" type="color" value="#ffffff" />
+          </label>
+          <button id="clearTableCellColorButton" class="small-button" type="button">색 지움</button>
+          <button id="deleteTableButton" class="small-button danger" type="button">표 삭제</button>
+        </div>
+
+        <div id="memoListPanel" class="memo-list-panel hidden" aria-label="전체 메모 목록">
+          <div class="memo-list-panel-header">
+            <strong>전체 메모</strong>
+            <button id="closeMemoListButton" class="memo-list-close" type="button" title="닫기">×</button>
+          </div>
+          <div id="allMemoList" class="all-memo-list"></div>
+        </div>
+
+        <div id="editor" class="memo-editor" contenteditable="true" spellcheck="false"></div>
+
+        <footer class="panel-footer">
+          <button id="addIndexButton" class="small-button" type="button">새 메모</button>
+          <span id="saveStatus" class="save-status">저장됨</span>
+        </footer>
+
+        <div id="panelResizeGrip" class="panel-resize-grip panel-resize-height" data-resize-axis="height" title="세로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeWidthGrip" class="panel-resize-grip panel-resize-width" data-resize-axis="width" title="가로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeCornerGrip" class="panel-resize-grip panel-resize-corner" data-resize-axis="both" title="가로세로 크기 조절" aria-hidden="true"></div>
+      </section>
+
+      <aside id="settingsPane" class="settings-pane" aria-label="설정">
+        <header class="settings-header">
+          <div>
+            <h2>설정</h2>
+            <p>플로팅 메모는 최대 5개까지 화면에 고정됩니다.</p>
+          </div>
+          <button id="closeSettingsButton" class="icon-button" type="button" title="닫기">×</button>
+        </header>
+
+        <div class="settings-action-bar">
+          <button id="applySettingsButton" class="primary-button" type="button">적용</button>
+          <p id="settingsStatus" class="settings-status"></p>
+        </div>
+
+        <section class="settings-section">
+          <h3>공통 기본값</h3>
+          <div class="default-fields">
+            <label class="field">
+              <span>새 메모 글씨체</span>
+              <select id="defaultFontFamilySelect"></select>
+            </label>
+            <label class="field">
+              <span>새 메모 크기</span>
+              <select id="defaultFontSizeSelect"></select>
+            </label>
+            <label class="field">
+              <span>새 메모 줄간격</span>
+              <select id="defaultLineSpacingSelect"></select>
+            </label>
+          </div>
+          <p class="hint-text">새로 만드는 메모는 이 기본값으로 시작합니다.</p>
+        </section>
+
+        <section class="settings-section">
+          <h3>창</h3>
+          <label class="field">
+            <span>표시 모니터</span>
+            <select id="displaySelect"></select>
+          </label>
+
+          <div class="window-placement-fields">
+            <label class="field">
+              <span>모니터 가장자리</span>
+              <select id="dockEdgeSelect">
+                <option value="right">오른쪽</option>
+                <option value="left">왼쪽</option>
+                <option value="top">위쪽</option>
+                <option value="bottom">아래쪽</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>평소 표시</span>
+              <select id="visibilityModeSelect">
+                <option value="peek">가장자리 탭 표시</option>
+                <option value="shortcutOnly">숨김 모드</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>가장자리 위치</span>
+            <select id="anchorSelect">
+              <option value="start">시작</option>
+              <option value="middle">가운데</option>
+              <option value="end">끝</option>
+              <option value="custom">자유 위치</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>패널 길이</span>
+            <select id="lengthSelect">
+              <option value="short">짧게</option>
+              <option value="normal">보통</option>
+              <option value="long">길게</option>
+              <option value="custom">자유 지정</option>
+            </select>
+          </label>
+
+          <div class="panel-size-fields">
+            <label class="field">
+              <span>패널 너비</span>
+              <input id="panelWidthInput" type="number" min="280" max="1200" step="10" />
+            </label>
+            <label class="field">
+              <span>자유 지정 높이</span>
+              <input id="panelHeightInput" type="number" min="180" max="1400" step="10" />
+            </label>
+            <label class="field">
+              <span>위치 오프셋</span>
+              <input id="panelPositionInput" type="number" min="-2500" max="2500" step="10" />
+            </label>
+            <p class="hint-text">px 단위</p>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3>단축키</h3>
+          <label class="field">
+            <span>다음 플로팅 메모</span>
+            <input id="cycleShortcutInput" class="shortcut-input" type="text" placeholder="CommandOrControl+Shift+D" readonly />
+          </label>
+
+          <label class="field">
+            <span>메모 숨기기</span>
+            <input id="hideShortcutInput" class="shortcut-input" type="text" placeholder="CommandOrControl+Shift+F" readonly />
+          </label>
+
+          <label class="check-field">
+            <input id="startupInput" type="checkbox" checked />
+            <span>컴퓨터를 켜면 자동 실행</span>
+          </label>
+
+          <label class="check-field">
+            <input id="startupGuideInput" type="checkbox" />
+            <span>앱이 켜질 때 안내 표시</span>
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <h3>데이터</h3>
+          <div class="data-actions">
+            <button id="exportDataButton" class="small-button" type="button">백업 저장</button>
+            <button id="importDataButton" class="small-button" type="button">백업 복원</button>
+            <button id="resetSettingsButton" class="small-button danger" type="button">설정 초기화</button>
+          </div>
+          <p class="hint-text">백업은 메모, 색상, 글씨체, 위치 설정을 JSON 파일로 저장합니다.</p>
+        </section>
+
+        <section class="settings-section index-section">
+          <div class="section-heading-row">
+            <h3>메모 목록</h3>
+            <button id="addSettingsIndexButton" class="small-button" type="button">추가</button>
+          </div>
+          <p id="floatingLimitText" class="hint-text"></p>
+          <div id="indexManagerList" class="index-manager-list"></div>
+        </section>
+      </aside>
+
+      <div id="launchGuide" class="launch-guide hidden" role="dialog" aria-modal="true" aria-label="MEMO BOM 안내">
+        <div class="launch-guide-card">
+          <h2>MEMO BOM이 실행 중입니다</h2>
+          <p id="launchGuideMessage"></p>
+          <div class="launch-guide-shortcuts">
+            <span id="launchGuideCycle"></span>
+            <span id="launchGuideHide"></span>
+          </div>
+          <label class="check-field">
+            <input id="hideLaunchGuideInput" type="checkbox" />
+            <span>다시 보지 않기</span>
+          </label>
+          <div class="launch-guide-actions">
+            <button id="launchGuideOpenButton" class="primary-button" type="button">메모 열기</button>
+            <button id="launchGuideSettingsButton" class="small-button" type="button">설정</button>
+            <button id="launchGuideBlogButton" class="small-button" type="button">문의 블로그</button>
+            <button id="closeLaunchGuideButton" class="small-button" type="button">닫기</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

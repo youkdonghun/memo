@@ -1,0 +1,152 @@
+:root {
+  --note-bg: #fff4b8;
+  --note-text: #283044;
+  --accent: #3d6cff;
+  --memo-font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --memo-font-size: 15px;
+  --memo-line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-family: var(--memo-font-family);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.detached-shell {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--note-bg);
+}
+
+.detached-header,
+.detached-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-color: color-mix(in srgb, var(--note-text) 15%, transparent);
+}
+
+.detached-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+}
+
+.detached-footer {
+  min-height: 34px;
+  border-top: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+  color: color-mix(in srgb, var(--note-text) 68%, transparent);
+  font-size: 11px;
+}
+
+.detached-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--note-text);
+  font-size: 15px;
+  font-weight: 800;
+  outline: none;
+}
+
+.attach-button {
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--note-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.detached-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  outline: none;
+  font-family: var(--memo-font-family);
+  font-size: var(--memo-font-size);
+  line-height: var(--memo-line-height);
+  word-break: break-word;
+}
+
+.detached-editor * {
+  font-family: var(--memo-font-family) !important;
+  line-height: var(--memo-line-height);
+}
+
+.memo-table {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.memo-table td {
+  min-width: 48px;
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 25%, transparent);
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.34);
+  vertical-align: top;
+}
+
+.check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 24px;
+  margin: 2px 0;
+}
+
+.check-box {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--note-text) 25%, transparent);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  user-select: none;
+}
+
+.check-text {
+  flex: 1 1 auto;
+  min-width: 1ch;
+  outline: none;
+  white-space: pre-wrap;
+}
+
+.check-item[data-checked="true"] .check-text {
+  text-decoration: line-through;
+  opacity: 0.65;
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MEMO BOM</title>
+    <link rel="stylesheet" href="./detached.css" />
+  </head>
+  <body>
+    <main class="detached-shell">
+      <header class="detached-header">
+        <input id="detachedTitleInput" class="detached-title" type="text" maxlength="80" />
+        <button id="attachMemoButton" class="attach-button" type="button">합치기</button>
+      </header>
+      <div id="detachedEditor" class="detached-editor" contenteditable="true" spellcheck="false"></div>
+      <footer class="detached-footer">
+        <span id="detachedSaveStatus">저장됨</span>
+      </footer>
+    </main>
+    <script src="./detached.js"></script>
+  </body>
+</html>
