@@ -32,7 +32,6 @@
             <input id="textColorInput" type="color" value="#283044" aria-label="글씨 색" />
           </label>
           <button id="backgroundButton" class="tool-button" type="button" title="배경 변경">▧</button>
-          <button id="clearButton" class="tool-button danger" type="button" title="전체 삭제">⌫</button>
         </div>
       </div>
       <div id="textColorPalette" class="text-color-palette hidden" aria-label="Text color palette"></div>
@@ -57,7 +56,6 @@
         <button id="deleteTableRowButton" class="small-button" type="button">행 삭제</button>
         <button id="deleteTableColButton" class="small-button" type="button">열 삭제</button>
         <button id="mergeTableCellsButton" class="small-button" type="button">셀 병합</button>
-        <button id="mergeTableDownButton" class="small-button" type="button">아래 병합</button>
         <button id="splitTableCellButton" class="small-button" type="button">셀 분할</button>
         <label class="table-style-field">
           <span>테두리</span>
@@ -84,7 +82,7 @@
       <div id="backgroundCropper" class="cropper-overlay hidden" role="dialog" aria-modal="true" aria-label="배경 자르기">
         <div class="cropper-panel">
           <div class="cropper-header">
-            <strong>배경 자르기</strong>
+            <strong id="cropperTitle">배경 자르기</strong>
             <button id="cropperCancelButton" class="tool-button" type="button" title="닫기">×</button>
           </div>
           <div id="cropperStage" class="cropper-stage">
@@ -95,9 +93,37 @@
               <span class="cropper-handle sw" data-crop-handle="sw"></span>
               <span class="cropper-handle se" data-crop-handle="se"></span>
             </div>
+            <div id="coveragePreview" class="coverage-preview hidden">
+              <img id="coverageImage" class="coverage-image-layer" alt="" />
+              <div class="coverage-preview-header">
+                <span>메모</span>
+                <span class="coverage-preview-icon">Aa</span>
+              </div>
+              <div class="coverage-preview-title">메모</div>
+              <div class="coverage-preview-toolbar">
+                <span class="coverage-preview-select">글림체</span>
+                <span>15</span>
+                <span>1.5</span>
+                <span>↶</span>
+                <span>↷</span>
+                <span>B</span>
+                <span>A</span>
+                <span>표</span>
+              </div>
+              <div class="coverage-preview-editor"></div>
+              <div class="coverage-preview-footer">
+                <span>저장됨</span>
+                <span></span>
+              </div>
+              <div id="coverageBox" class="coverage-box hidden" title="드래그해서 범위 이동, 위아래 손잡이로 높이 조절, 더블클릭 후 사진 위치 이동">
+                <span class="coverage-handle top" data-coverage-handle="top"></span>
+                <span class="coverage-handle bottom" data-coverage-handle="bottom"></span>
+              </div>
+            </div>
           </div>
           <div class="cropper-actions">
             <button id="cropperResetButton" class="small-button" type="button">전체</button>
+            <button id="cropperClearBackgroundButton" class="small-button danger hidden" type="button">배경 지우기</button>
             <button id="cropperApplyButton" class="small-button" type="button">등록</button>
           </div>
         </div>

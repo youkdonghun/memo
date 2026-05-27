@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   panelHeight: BASE_HEIGHT,
   cycleShortcut: "CommandOrControl+Shift+D",
   hideShortcut: "CommandOrControl+Shift+F",
+  findShortcut: "CommandOrControl+F",
   anchor: "middle",
   manualYOffset: 0,
   followCursorDisplay: false,
@@ -60,6 +61,7 @@ let registeredHideShortcut = null;
 let followDisplayTimer = null;
 let isQuitting = false;
 let settingsOpen = false;
+let temporaryPanelWidth = null;
 let settingsSaveTimer = null;
 const detachedWindows = new Map();
 const detachedMemos = new Map();
@@ -148,6 +150,10 @@ function normalizeSettings(partial = {}) {
       typeof merged.hideShortcut === "string" && merged.hideShortcut.trim()
         ? merged.hideShortcut.trim()
         : DEFAULT_SETTINGS.hideShortcut,
+    findShortcut:
+      typeof merged.findShortcut === "string" && merged.findShortcut.trim()
+        ? merged.findShortcut.trim()
+        : DEFAULT_SETTINGS.findShortcut,
     anchor: anchorAlias,
     manualYOffset:
       edgeOffset,
@@ -375,7 +381,11 @@ function preferredPanelHeight(display) {
 
 function preferredPanelWidth(display) {
   const maxWidth = Math.max(MIN_PANEL_WIDTH, display.bounds.width - WINDOW_VERTICAL_MARGIN * 2);
-  return clamp(settings.panelWidth, MIN_PANEL_WIDTH, Math.min(MAX_CUSTOM_WIDTH, maxWidth));
+  const preferredWidth =
+    settingsOpen && Number.isFinite(temporaryPanelWidth)
+      ? Math.max(settings.panelWidth, temporaryPanelWidth)
+      : settings.panelWidth;
+  return clamp(preferredWidth, MIN_PANEL_WIDTH, Math.min(MAX_CUSTOM_WIDTH, maxWidth));
 }
 
 function getWindowSize(display) {
@@ -464,7 +474,10 @@ function loginItemOptions() {
 
 function setExpanded(nextExpanded, notifyRenderer = true) {
   expanded = Boolean(nextExpanded);
-  if (!expanded) settingsOpen = false;
+  if (!expanded) {
+    settingsOpen = false;
+    temporaryPanelWidth = null;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     refreshWindowBounds(true);
     if (notifyRenderer) {
@@ -477,9 +490,22 @@ function setExpanded(nextExpanded, notifyRenderer = true) {
 
 function setSettingsOpen(nextOpen) {
   settingsOpen = Boolean(nextOpen) && expanded;
+  if (!settingsOpen) temporaryPanelWidth = null;
   refreshWindowBounds(true);
   applyWindowVisibility();
   return { ok: true, settingsOpen };
+}
+
+function setTemporaryPanelWidth(nextWidth) {
+  const numeric = Number(nextWidth);
+  temporaryPanelWidth = Number.isFinite(numeric) ? clamp(Math.round(numeric), MIN_PANEL_WIDTH, MAX_CUSTOM_WIDTH) : null;
+  refreshWindowBounds(true);
+  applyWindowVisibility();
+  return {
+    ok: true,
+    panelWidth: preferredPanelWidth(getTargetDisplay()),
+    temporaryPanelWidth
+  };
 }
 
 function showWindow() {
@@ -527,6 +553,22 @@ function normalizeBackgroundCrop(value) {
   };
 }
 
+function normalizeBackgroundCoverage(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0.1, 1) * 10000) / 10000 : 1;
+}
+
+function normalizeBackgroundTop(value, coverage = 1) {
+  const normalizedCoverage = normalizeBackgroundCoverage(coverage);
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0, 1 - normalizedCoverage) * 10000) / 10000 : 0;
+}
+
+function normalizeBackgroundPosition(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0, 1) * 10000) / 10000 : 0.5;
+}
+
 function normalizeDetachedMemo(memo = {}) {
   return {
     id: typeof memo.id === "string" && memo.id ? memo.id : `memo-${Date.now()}`,
@@ -549,6 +591,10 @@ function normalizeDetachedMemo(memo = {}) {
         : Number.isFinite(Number(memo.backgroundOpacity))
           ? clamp(Number(memo.backgroundOpacity), 0, 1)
           : 0,
+    backgroundTop: normalizeBackgroundTop(memo.backgroundTop, memo.backgroundCoverage),
+    backgroundCoverage: normalizeBackgroundCoverage(memo.backgroundCoverage),
+    backgroundPositionX: normalizeBackgroundPosition(memo.backgroundPositionX),
+    backgroundPositionY: normalizeBackgroundPosition(memo.backgroundPositionY),
     html: typeof memo.html === "string" ? memo.html : ""
   };
 }
@@ -775,6 +821,7 @@ ipcMain.handle("shell:set-expanded", (_, nextExpanded) => {
 });
 
 ipcMain.handle("shell:set-settings-open", (_, nextOpen) => setSettingsOpen(nextOpen));
+ipcMain.handle("shell:set-temporary-panel-width", (_, nextWidth) => setTemporaryPanelWidth(nextWidth));
 
 ipcMain.handle("shell:update-settings", (_, partialSettings = {}) => {
   settings = normalizeSettings(partialSettings);

@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("memoEdge", {
   getShellState: () => ipcRenderer.invoke("shell:get-state"),
   setExpanded: (expanded) => ipcRenderer.invoke("shell:set-expanded", expanded),
   setSettingsOpen: (open) => ipcRenderer.invoke("shell:set-settings-open", open),
+  setTemporaryPanelWidth: (width) => ipcRenderer.invoke("shell:set-temporary-panel-width", width),
   updateSettings: (settings) => ipcRenderer.invoke("shell:update-settings", settings),
   setPanelHeight: (height) => ipcRenderer.invoke("shell:set-panel-height", height),
   setPanelSize: (size) => ipcRenderer.invoke("shell:set-panel-size", size),

@@ -2,6 +2,12 @@ const CHECK_TEXT_PLACEHOLDER = "\u200b";
 const DEFAULT_FONT_FAMILY = "Gulim";
 const DEFAULT_FONT_SIZE = 15;
 const DEFAULT_LINE_SPACING = 1.5;
+const MAX_PASTED_TABLE_ROWS = 80;
+const MAX_PASTED_TABLE_COLS = 40;
+const SAVE_DEBOUNCE_MS = 450;
+const HISTORY_DEBOUNCE_MS = 650;
+const MAX_EDITOR_HISTORY_ENTRIES = 35;
+const MAX_EDITOR_HISTORY_BYTES = 1800000;
 const FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64, 72, 96];
 const LINE_SPACING_OPTIONS = [0.8, 1, 1.15, 1.5, 2, 2.5, 3, 3.5, 4];
 const DETACHED_RECENT_TEXT_COLORS_KEY = "memo-bom-detached-recent-text-colors";
@@ -34,8 +40,11 @@ const FONT_LABELS = {
 
 let memo = null;
 let saveTimer = null;
+let historyTimer = null;
 let savedEditorRange = null;
 let lastTableCell = null;
+let tableSelectionState = null;
+let tableDragSelectState = null;
 let systemFonts = [DEFAULT_FONT_FAMILY, "GulimChe", "Malgun Gothic", "Arial", "Calibri", "Consolas"];
 let customFonts = [];
 let editorHistory = [];
@@ -61,12 +70,17 @@ const textColorInput = document.getElementById("textColorInput");
 const textColorPalette = document.getElementById("textColorPalette");
 const backgroundButton = document.getElementById("backgroundButton");
 const backgroundCropper = document.getElementById("backgroundCropper");
+const cropperTitle = document.getElementById("cropperTitle");
 const cropperStage = document.getElementById("cropperStage");
 const cropperImage = document.getElementById("cropperImage");
 const cropperBox = document.getElementById("cropperBox");
+const coveragePreview = document.getElementById("coveragePreview");
+const coverageBox = document.getElementById("coverageBox");
+const coverageImage = document.getElementById("coverageImage");
 const cropperApplyButton = document.getElementById("cropperApplyButton");
 const cropperCancelButton = document.getElementById("cropperCancelButton");
 const cropperResetButton = document.getElementById("cropperResetButton");
+const cropperClearBackgroundButton = document.getElementById("cropperClearBackgroundButton");
 const tablePicker = document.getElementById("tablePicker");
 const tableRowsInput = document.getElementById("tableRowsInput");
 const tableColsInput = document.getElementById("tableColsInput");
@@ -136,6 +150,22 @@ function normalizeOpacity(value) {
   return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0, 1) * 100) / 100 : 0;
 }
 
+function normalizeBackgroundCoverage(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0.1, 1) * 10000) / 10000 : 1;
+}
+
+function normalizeBackgroundTop(value, coverage = 1) {
+  const normalizedCoverage = normalizeBackgroundCoverage(coverage);
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0, 1 - normalizedCoverage) * 10000) / 10000 : 0;
+}
+
+function normalizeBackgroundPosition(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0, 1) * 10000) / 10000 : 0.5;
+}
+
 function normalizeAssetUrl(value) {
   return typeof value === "string" && /^(file|https?|data):/i.test(value.trim()) ? value.trim() : "";
 }
@@ -201,13 +231,25 @@ function backgroundTransparencyState(nextMemo = memo) {
   const color = normalizeHexColor(nextMemo?.color, "#fff4b8");
   const backgroundImage = normalizeAssetUrl(nextMemo?.backgroundImage);
   const transparency = normalizeOpacity(nextMemo?.backgroundOpacity);
+  const coverage = backgroundImage ? normalizeBackgroundCoverage(nextMemo?.backgroundCoverage) : 1;
   return {
     color,
     backgroundImage,
+    top: backgroundImage ? normalizeBackgroundTop(nextMemo?.backgroundTop, coverage) : 0,
+    coverage,
+    positionX: normalizeBackgroundPosition(nextMemo?.backgroundPositionX),
+    positionY: normalizeBackgroundPosition(nextMemo?.backgroundPositionY),
     imageOpacity: backgroundImage ? 1 - transparency : 0,
+    outsideColorAlpha: backgroundImage ? 1 - transparency : 0,
     panelColorAlpha: backgroundImage ? 0 : 1 - transparency
   };
 }
+
+function hasMemoBackground(nextMemo = memo) {
+  return Boolean(normalizeAssetUrl(nextMemo?.backgroundImage || nextMemo?.backgroundSourceImage));
+}
+
+function syncBackgroundControls() {}
 
 function accentColor(hex) {
   const rgb = hexToRgb(hex);
@@ -322,13 +364,20 @@ function populateLineSpacingSelect(select, currentSpacing) {
 }
 
 function applyMemoTheme() {
-  const { color, backgroundImage, imageOpacity, panelColorAlpha } = backgroundTransparencyState(memo);
+  const { color, backgroundImage, top, coverage, positionX, positionY, imageOpacity, outsideColorAlpha, panelColorAlpha } =
+    backgroundTransparencyState(memo);
   document.documentElement.style.setProperty("--note-bg", color);
   document.documentElement.style.setProperty("--note-text", readableTextColor(color));
   document.documentElement.style.setProperty("--accent", accentColor(color));
   document.documentElement.style.setProperty("--memo-bg-image", backgroundImage ? `url("${backgroundImage.replace(/"/g, "%22")}")` : "none");
   document.documentElement.style.setProperty("--memo-bg-opacity", String(imageOpacity));
+  document.documentElement.style.setProperty("--memo-bg-top", `${Math.round(top * 10000) / 100}%`);
+  document.documentElement.style.setProperty("--memo-bg-coverage", `${Math.round(coverage * 10000) / 100}%`);
+  document.documentElement.style.setProperty("--memo-bg-position-x", `${Math.round(positionX * 10000) / 100}%`);
+  document.documentElement.style.setProperty("--memo-bg-position-y", `${Math.round(positionY * 10000) / 100}%`);
+  document.documentElement.style.setProperty("--memo-outside-bg", rgbaString(color, outsideColorAlpha));
   document.documentElement.style.setProperty("--memo-panel-bg", rgbaString(color, panelColorAlpha));
+  syncBackgroundControls();
 }
 
 function applyMemoTypography() {
@@ -357,9 +406,14 @@ function applyMemo(nextMemo) {
     backgroundSourceImage: normalizeAssetUrl(nextMemo?.backgroundSourceImage || nextMemo?.backgroundImage),
     backgroundCrop: normalizeBackgroundCrop(nextMemo?.backgroundCrop),
     backgroundOpacity: normalizeOpacity(nextMemo?.backgroundOpacity),
+    backgroundTop: normalizeBackgroundTop(nextMemo?.backgroundTop, nextMemo?.backgroundCoverage),
+    backgroundCoverage: normalizeBackgroundCoverage(nextMemo?.backgroundCoverage),
+    backgroundPositionX: normalizeBackgroundPosition(nextMemo?.backgroundPositionX),
+    backgroundPositionY: normalizeBackgroundPosition(nextMemo?.backgroundPositionY),
     html: typeof nextMemo?.html === "string" ? nextMemo.html : ""
   };
   titleInput.value = memo.title;
+  clearTableSelection();
   editor.innerHTML = memo.html || "";
   applyMemoTheme();
   applyMemoTypography();
@@ -371,6 +425,7 @@ function applyMemo(nextMemo) {
 
 function serializedEditorHtml() {
   const clone = editor.cloneNode(true);
+  stripTransientTableSelection(clone);
   clone.querySelectorAll(".check-text").forEach((text) => {
     text.textContent = text.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
   });
@@ -383,6 +438,10 @@ function serializedEditorHtml() {
 
 async function saveNow() {
   if (!memo) return;
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
   memo.title = titleInput.value.trim().slice(0, 80) || "메모";
   memo.html = serializedEditorHtml();
   saveStatus.textContent = "저장 중";
@@ -394,25 +453,62 @@ async function saveNow() {
 function scheduleSave() {
   saveStatus.textContent = "저장 중";
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveNow, 180);
+  saveTimer = setTimeout(saveNow, SAVE_DEBOUNCE_MS);
 }
 
-function pushEditorHistory() {
+function clearPendingEditorHistory() {
+  if (!historyTimer) return;
+  clearTimeout(historyTimer);
+  historyTimer = null;
+}
+
+function trimEditorHistory() {
+  while (editorHistory.length > MAX_EDITOR_HISTORY_ENTRIES) {
+    editorHistory.shift();
+    editorHistoryIndex -= 1;
+  }
+
+  let totalBytes = editorHistory.reduce((sum, snapshot) => sum + snapshot.length * 2, 0);
+  while (editorHistory.length > 1 && totalBytes > MAX_EDITOR_HISTORY_BYTES) {
+    const removed = editorHistory.shift() || "";
+    totalBytes -= removed.length * 2;
+    editorHistoryIndex -= 1;
+  }
+
+  if (!editorHistory.length) {
+    editorHistoryIndex = -1;
+    return;
+  }
+  editorHistoryIndex = Math.max(0, Math.min(editorHistoryIndex, editorHistory.length - 1));
+}
+
+function pushEditorHistory(snapshot = serializedEditorHtml()) {
   if (applyingHistory) return;
-  const snapshot = serializedEditorHtml();
+  clearPendingEditorHistory();
   if (editorHistory[editorHistoryIndex] === snapshot) return;
   editorHistory = editorHistory.slice(0, editorHistoryIndex + 1);
   editorHistory.push(snapshot);
-  if (editorHistory.length > 80) editorHistory.shift();
   editorHistoryIndex = editorHistory.length - 1;
+  trimEditorHistory();
+}
+
+function queueEditorHistory() {
+  if (applyingHistory) return;
+  if (historyTimer) clearTimeout(historyTimer);
+  historyTimer = setTimeout(() => {
+    historyTimer = null;
+    pushEditorHistory();
+  }, HISTORY_DEBOUNCE_MS);
 }
 
 function resetEditorHistory() {
+  clearPendingEditorHistory();
   editorHistory = [serializedEditorHtml()];
   editorHistoryIndex = 0;
 }
 
 function applyEditorHistorySnapshot(snapshot) {
+  clearPendingEditorHistory();
   applyingHistory = true;
   editor.innerHTML = snapshot || "";
   prepareChecklistItems();
@@ -739,15 +835,141 @@ function resetCropBox(forceFull = false) {
   renderCropBox();
 }
 
-function openBackgroundCropper(sourceUrl, crop = null) {
+function cropperStageSize() {
+  const target = backgroundCropperState?.mode === "coverage" ? coveragePreview : cropperStage;
+  const rect = target?.getBoundingClientRect();
+  if (!rect?.width || !rect?.height) return null;
+  return { width: rect.width, height: rect.height };
+}
+
+function backgroundPlacementFromMemo(nextMemo = memo) {
+  const coverage = normalizeBackgroundCoverage(nextMemo?.backgroundCoverage);
+  return {
+    top: normalizeBackgroundTop(nextMemo?.backgroundTop, coverage),
+    coverage,
+    positionX: normalizeBackgroundPosition(nextMemo?.backgroundPositionX),
+    positionY: normalizeBackgroundPosition(nextMemo?.backgroundPositionY)
+  };
+}
+
+function boxFromBackgroundPlacement(placement, stage) {
+  const coverage = normalizeBackgroundCoverage(placement?.coverage);
+  return {
+    top: normalizeBackgroundTop(placement?.top, coverage) * stage.height,
+    height: coverage * stage.height
+  };
+}
+
+function clampCoverageBox(box) {
+  const stage = cropperStageSize();
+  if (!stage) return box;
+  const minHeight = Math.min(stage.height, Math.max(48, stage.height * 0.12));
+  const height = clamp(box.height, minHeight, stage.height);
+  const top = clamp(box.top, 0, stage.height - height);
+  return { top, height };
+}
+
+function renderCoverageBox() {
+  if (!coverageBox || !backgroundCropperState?.coverageBox) return;
+  const box = backgroundCropperState.coverageBox;
+  const imageX = `${Math.round(normalizeBackgroundPosition(backgroundCropperState.imagePositionX) * 10000) / 100}%`;
+  const imageY = `${Math.round(normalizeBackgroundPosition(backgroundCropperState.imagePositionY) * 10000) / 100}%`;
+  coverageBox.style.top = `${box.top}px`;
+  coverageBox.style.height = `${box.height}px`;
+  coveragePreview?.style.setProperty("--coverage-image-x", imageX);
+  coveragePreview?.style.setProperty("--coverage-image-y", imageY);
+  if (coverageImage) {
+    coverageImage.style.top = `${box.top}px`;
+    coverageImage.style.height = `${box.height}px`;
+  }
+  coverageBox.classList.toggle("image-move-mode", backgroundCropperState.imageMoveMode === true);
+}
+
+function updateCoverageModeTitle() {
+  if (!cropperTitle || backgroundCropperState?.mode !== "coverage") return;
+  cropperTitle.textContent = backgroundCropperState.imageMoveMode ? "사진 위치 조정" : "등록 범위 지정";
+}
+
+function coverageCurrentPlacement() {
+  const stage = cropperStageSize();
+  const box = backgroundCropperState?.coverageBox;
+  if (!stage || !box) {
+    return {
+      top: 0,
+      coverage: 1,
+      positionX: normalizeBackgroundPosition(backgroundCropperState?.imagePositionX),
+      positionY: normalizeBackgroundPosition(backgroundCropperState?.imagePositionY)
+    };
+  }
+  const coverage = normalizeBackgroundCoverage(box.height / stage.height);
+  return {
+    top: normalizeBackgroundTop(box.top / stage.height, coverage),
+    coverage,
+    positionX: normalizeBackgroundPosition(backgroundCropperState.imagePositionX),
+    positionY: normalizeBackgroundPosition(backgroundCropperState.imagePositionY)
+  };
+}
+
+function resetCoverageBox(forceFull = false) {
+  const stage = cropperStageSize();
+  if (!stage || !backgroundCropperState) return;
+  const placement = forceFull ? { top: 0, coverage: 1 } : backgroundCropperState.initialPlacement;
+  backgroundCropperState.coverageBox = clampCoverageBox(boxFromBackgroundPlacement(placement, stage));
+  renderCoverageBox();
+}
+
+function setCropperMode(mode) {
+  if (!backgroundCropperState) return;
+  const coverageMode = mode === "coverage";
+  backgroundCropperState.mode = mode;
+  cropperTitle && (cropperTitle.textContent = coverageMode ? "등록 범위 지정" : "배경 자르기");
+  cropperStage?.classList.toggle("coverage-mode", coverageMode);
+  cropperBox?.classList.toggle("hidden", coverageMode);
+  coveragePreview?.classList.toggle("hidden", !coverageMode);
+  coverageBox?.classList.toggle("hidden", !coverageMode);
+  updateCoverageModeTitle();
+}
+
+function beginCoveragePlacement(dataUrl, crop) {
+  if (!backgroundCropperState || !coverageImage) return;
+  backgroundCropperState.pendingDataUrl = dataUrl;
+  backgroundCropperState.pendingCrop = crop;
+  backgroundCropperState.initialPlacement = backgroundPlacementFromMemo(memo);
+  backgroundCropperState.imagePositionX = backgroundCropperState.initialPlacement.positionX;
+  backgroundCropperState.imagePositionY = backgroundCropperState.initialPlacement.positionY;
+  backgroundCropperState.imageMoveMode = false;
+  backgroundCropperState.coverageBox = null;
+  backgroundCropperState.drag = null;
+  cropperStage?.style.setProperty("--coverage-preview-bg", normalizeHexColor(memo?.color, "#fff4b8"));
+  coveragePreview?.querySelector(".coverage-preview-title") &&
+    (coveragePreview.querySelector(".coverage-preview-title").textContent = memo?.title || "메모");
+  setCropperMode("coverage");
+  coverageImage.onload = () => requestAnimationFrame(() => resetCoverageBox());
+  coverageImage.removeAttribute("src");
+  coverageImage.src = dataUrl;
+  requestAnimationFrame(() => resetCoverageBox());
+}
+
+function openBackgroundCropper(sourceUrl, crop = null, isExisting = false) {
   if (!sourceUrl || !backgroundCropper || !cropperImage) return;
   backgroundCropperState = {
+    mode: "crop",
     sourceUrl,
+    isExisting: Boolean(isExisting),
     initialCrop: normalizeBackgroundCrop(crop),
+    initialPlacement: backgroundPlacementFromMemo(memo),
+    pendingDataUrl: "",
+    pendingCrop: null,
     imageRect: null,
     box: null,
+    coverageBox: null,
+    imagePositionX: normalizeBackgroundPosition(memo?.backgroundPositionX),
+    imagePositionY: normalizeBackgroundPosition(memo?.backgroundPositionY),
+    imageMoveMode: false,
     drag: null
   };
+  setCropperMode("crop");
+  cropperClearBackgroundButton?.classList.toggle("hidden", !backgroundCropperState.isExisting);
   cropperApplyButton.disabled = false;
   cropperImage.onload = () => requestAnimationFrame(() => resetCropBox());
   cropperImage.onerror = () => {
@@ -755,6 +977,7 @@ function openBackgroundCropper(sourceUrl, crop = null) {
     cropperApplyButton.disabled = false;
   };
   cropperImage.removeAttribute("src");
+  coverageImage?.removeAttribute("src");
   backgroundCropper.classList.remove("hidden");
   cropperImage.src = sourceUrl;
 }
@@ -762,11 +985,24 @@ function openBackgroundCropper(sourceUrl, crop = null) {
 function closeBackgroundCropper() {
   backgroundCropperState = null;
   if (backgroundCropper) backgroundCropper.classList.add("hidden");
+  cropperStage?.classList.remove("coverage-mode");
+  cropperStage?.style.removeProperty("--coverage-preview-bg");
+  cropperBox?.classList.remove("hidden");
+  coveragePreview?.classList.add("hidden");
+  coverageBox?.classList.add("hidden");
+  coverageBox?.classList.remove("image-move-mode");
+  cropperClearBackgroundButton?.classList.add("hidden");
   if (cropperImage) cropperImage.removeAttribute("src");
+  if (coverageImage) coverageImage.removeAttribute("src");
 }
 
 function handleCropperWindowResize() {
   if (!backgroundCropperState) return;
+  if (backgroundCropperState.mode === "coverage") {
+    backgroundCropperState.initialPlacement = coverageCurrentPlacement();
+    requestAnimationFrame(() => resetCoverageBox());
+    return;
+  }
   backgroundCropperState.initialCrop = cropperCurrentCrop() || backgroundCropperState.initialCrop;
   requestAnimationFrame(() => resetCropBox());
 }
@@ -786,7 +1022,69 @@ function resizeCropBox(handle, startBox, deltaX, deltaY) {
   return { left, top, width, height };
 }
 
+function resizeCoveragePlacement(handle, startBox, deltaY) {
+  if (handle === "top") return { top: startBox.top + deltaY, height: startBox.height - deltaY };
+  if (handle === "bottom") return { top: startBox.top, height: startBox.height + deltaY };
+  return { top: startBox.top + deltaY, height: startBox.height };
+}
+
+function moveCoverageImagePosition(startX, startY, deltaX, deltaY) {
+  const box = backgroundCropperState?.coverageBox;
+  const imageRect = coverageImage?.getBoundingClientRect();
+  const width = imageRect?.width || cropperStageSize()?.width;
+  const height = imageRect?.height || box?.height;
+  if (!width || !height) return;
+  backgroundCropperState.imagePositionX = normalizeBackgroundPosition(startX - deltaX / width);
+  backgroundCropperState.imagePositionY = normalizeBackgroundPosition(startY - deltaY / height);
+  renderCoverageBox();
+}
+
+function toggleCoverageImageMoveMode(event) {
+  if (backgroundCropperState?.mode !== "coverage") return;
+  const target = event?.target;
+  if (target instanceof Element && target.dataset.coverageHandle) return;
+  event?.preventDefault();
+  event?.stopPropagation();
+  backgroundCropperState.imageMoveMode = !backgroundCropperState.imageMoveMode;
+  updateCoverageModeTitle();
+  renderCoverageBox();
+}
+
+function beginCoverageDrag(event) {
+  if (!backgroundCropperState?.coverageBox) return;
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest("#coverageBox")) return;
+  const handle = target.dataset.coverageHandle || "move";
+  backgroundCropperState.drag = {
+    handle: backgroundCropperState.imageMoveMode && handle === "move" ? "image" : handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    startPositionX: backgroundCropperState.imagePositionX,
+    startPositionY: backgroundCropperState.imagePositionY,
+    startBox: { ...backgroundCropperState.coverageBox }
+  };
+  cropperStage?.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function moveCoverageDrag(event) {
+  if (!backgroundCropperState?.drag) return;
+  const drag = backgroundCropperState.drag;
+  const deltaX = event.clientX - drag.startX;
+  const deltaY = event.clientY - drag.startY;
+  if (drag.handle === "image") {
+    moveCoverageImagePosition(drag.startPositionX, drag.startPositionY, deltaX, deltaY);
+    return;
+  }
+  backgroundCropperState.coverageBox = clampCoverageBox(resizeCoveragePlacement(drag.handle, drag.startBox, deltaY));
+  renderCoverageBox();
+}
+
 function beginCropDrag(event) {
+  if (backgroundCropperState?.mode === "coverage") {
+    beginCoverageDrag(event);
+    return;
+  }
   if (!backgroundCropperState?.box) return;
   const target = event.target;
   if (!(target instanceof Element) || !target.closest("#cropperBox")) return;
@@ -802,6 +1100,10 @@ function beginCropDrag(event) {
 }
 
 function moveCropDrag(event) {
+  if (backgroundCropperState?.mode === "coverage") {
+    moveCoverageDrag(event);
+    return;
+  }
   if (!backgroundCropperState?.drag) return;
   const drag = backgroundCropperState.drag;
   const deltaX = event.clientX - drag.startX;
@@ -848,10 +1150,29 @@ function croppedBackgroundDataUrl() {
 
 async function applyBackgroundCrop() {
   if (!memo || !backgroundCropperState) return;
+  if (backgroundCropperState.mode === "coverage") {
+    await applyBackgroundPlacement();
+    return;
+  }
   cropperApplyButton.disabled = true;
-  const sourceUrl = backgroundCropperState.sourceUrl;
   const crop = cropperCurrentCrop();
   const dataUrl = croppedBackgroundDataUrl();
+  if (!dataUrl) {
+    saveStatus.textContent = "Background crop failed.";
+    cropperApplyButton.disabled = false;
+    return;
+  }
+  beginCoveragePlacement(dataUrl, crop);
+  cropperApplyButton.disabled = false;
+}
+
+async function applyBackgroundPlacement() {
+  if (!memo || !backgroundCropperState) return;
+  cropperApplyButton.disabled = true;
+  const sourceUrl = backgroundCropperState.sourceUrl;
+  const crop = backgroundCropperState.pendingCrop || cropperCurrentCrop();
+  const dataUrl = backgroundCropperState.pendingDataUrl;
+  const placement = coverageCurrentPlacement();
   const result = await window.memoEdge.saveBackgroundImage?.(dataUrl);
   if (!result?.ok || !result?.url) {
     saveStatus.textContent = `Background save failed: ${result?.message || "no image"}`;
@@ -862,6 +1183,10 @@ async function applyBackgroundCrop() {
   memo.backgroundSourceImage = sourceUrl;
   memo.backgroundCrop = crop;
   memo.backgroundOpacity = normalizeOpacity(memo.backgroundOpacity);
+  memo.backgroundTop = placement.top;
+  memo.backgroundCoverage = placement.coverage;
+  memo.backgroundPositionX = placement.positionX;
+  memo.backgroundPositionY = placement.positionY;
   applyMemoTheme();
   scheduleSave();
   closeBackgroundCropper();
@@ -883,23 +1208,66 @@ function fileToDataUrl(file) {
   });
 }
 
-async function saveBackgroundFile(file) {
+async function savePastedImageFile(file) {
   const dataUrl = await fileToDataUrl(file);
   const result = await window.memoEdge.saveBackgroundImage?.(dataUrl);
-  if (!result?.ok || !result?.url) throw new Error(result?.message || "BACKGROUND_SAVE_FAILED");
+  if (!result?.ok || !result?.url) throw new Error(result?.message || "IMAGE_SAVE_FAILED");
   return result.url;
 }
 
-async function handleBackgroundPaste(event) {
+function shouldHandleEditorPaste(event) {
+  if (backgroundCropper && !backgroundCropper.classList.contains("hidden")) return false;
+
+  const target = event.target;
+  if (target instanceof Element) {
+    if (target.closest("input, textarea, select, button, .table-picker, .table-tools")) return false;
+    const editable = target.closest("[contenteditable='true']");
+    if (editable && editable !== editor && !editor.contains(editable)) return false;
+  }
+
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  return editor.contains(document.activeElement) || selectionBelongsToEditor(range) || selectionBelongsToEditor(savedEditorRange);
+}
+
+function insertInlineImage(url) {
+  restoreEditorSelection();
+  const imageLine = document.createElement("div");
+  imageLine.className = "memo-image-line";
+  const image = document.createElement("img");
+  image.className = "memo-inline-image";
+  image.src = url;
+  image.alt = "";
+  imageLine.appendChild(image);
+
+  const afterLine = createBlankLine();
+  const fragment = document.createDocumentFragment();
+  fragment.append(imageLine, afterLine);
+  insertNodeAtSelection(fragment);
+  placeCaretInBlock(afterLine);
+  scheduleSave();
+  pushEditorHistory();
+}
+
+async function handleEditorPaste(event) {
   if (!memo) return;
+  if (!shouldHandleEditorPaste(event)) return;
+
+  const table = pastedTableFromClipboard(event.clipboardData);
+  if (table) {
+    event.preventDefault();
+    insertPastedTable(table);
+    return;
+  }
+
   const file = imageFileFromPaste(event);
   if (!file) return;
   event.preventDefault();
   try {
-    const sourceUrl = await saveBackgroundFile(file);
-    openBackgroundCropper(sourceUrl, null);
+    const sourceUrl = await savePastedImageFile(file);
+    insertInlineImage(sourceUrl);
   } catch (error) {
-    saveStatus.textContent = `Background paste failed: ${error.message || error}`;
+    saveStatus.textContent = `이미지 붙여넣기 실패: ${error.message || error}`;
   }
 }
 
@@ -907,17 +1275,31 @@ async function importBackgroundForDetachedMemo() {
   if (!memo) return;
   const result = await window.memoEdge.importBackgroundImage?.();
   if (result?.canceled || !result?.ok || !result?.url) return;
-  openBackgroundCropper(result.url, null);
+  openBackgroundCropper(result.url, null, false);
 }
 
 async function editBackgroundForDetachedMemo() {
   if (!memo) return;
   const sourceUrl = normalizeAssetUrl(memo.backgroundSourceImage || memo.backgroundImage);
   if (sourceUrl) {
-    openBackgroundCropper(sourceUrl, memo.backgroundCrop);
+    openBackgroundCropper(sourceUrl, memo.backgroundCrop, true);
     return;
   }
   await importBackgroundForDetachedMemo();
+}
+
+function clearDetachedBackground() {
+  if (!memo) return;
+  memo.backgroundImage = "";
+  memo.backgroundSourceImage = "";
+  memo.backgroundCrop = null;
+  memo.backgroundTop = 0;
+  memo.backgroundCoverage = 1;
+  memo.backgroundPositionX = 0.5;
+  memo.backgroundPositionY = 0.5;
+  applyMemoTheme();
+  scheduleSave();
+  closeBackgroundCropper();
 }
 
 function setTextColorPaletteOpen(open) {
@@ -1162,6 +1544,105 @@ function createTableCell() {
   return cell;
 }
 
+function fillTableCellText(cell, text) {
+  cell.textContent = "";
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
+  const meaningfulLines = lines.length ? lines : [""];
+  meaningfulLines.forEach((line, index) => {
+    if (index > 0) cell.appendChild(document.createElement("br"));
+    if (line) cell.appendChild(document.createTextNode(line));
+  });
+  if (!cell.childNodes.length) cell.appendChild(document.createElement("br"));
+}
+
+function textFromClipboardHtmlCell(sourceCell) {
+  const html = String(sourceCell?.innerHTML || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li|tr)>/gi, "\n");
+  const probe = document.createElement("div");
+  probe.innerHTML = html;
+  return probe.textContent.replace(/\u00a0/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function pastedTableFromHtml(html) {
+  if (!html || !/<table[\s>]/i.test(html)) return null;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const sourceTable = doc.querySelector("table");
+  if (!sourceTable) return null;
+
+  const table = document.createElement("table");
+  table.className = "memo-table";
+  const tbody = document.createElement("tbody");
+  let hasCells = false;
+
+  Array.from(sourceTable.querySelectorAll("tr"))
+    .slice(0, MAX_PASTED_TABLE_ROWS)
+    .forEach((sourceRow) => {
+      const cells = Array.from(sourceRow.querySelectorAll(":scope > th, :scope > td")).slice(0, MAX_PASTED_TABLE_COLS);
+      if (!cells.length) return;
+      const row = document.createElement("tr");
+      cells.forEach((sourceCell) => {
+        const cell = createTableCell();
+        cell.colSpan = clampTableDimension(sourceCell.getAttribute("colspan") || 1, 1, MAX_PASTED_TABLE_COLS, 1);
+        cell.rowSpan = clampTableDimension(sourceCell.getAttribute("rowspan") || 1, 1, MAX_PASTED_TABLE_ROWS, 1);
+        if (sourceCell.style?.backgroundColor) cell.style.backgroundColor = sourceCell.style.backgroundColor;
+        fillTableCellText(cell, textFromClipboardHtmlCell(sourceCell));
+        row.appendChild(cell);
+        hasCells = true;
+      });
+      tbody.appendChild(row);
+    });
+
+  if (!hasCells) return null;
+  table.appendChild(tbody);
+  return table;
+}
+
+function pastedTableFromText(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n$/, "");
+  if (!normalized.includes("\t")) return null;
+  const rows = normalized
+    .split("\n")
+    .slice(0, MAX_PASTED_TABLE_ROWS)
+    .map((row) => row.split("\t").slice(0, MAX_PASTED_TABLE_COLS));
+  if (!rows.length || (rows.length === 1 && rows[0].length <= 1)) return null;
+
+  const table = document.createElement("table");
+  table.className = "memo-table";
+  const tbody = document.createElement("tbody");
+  rows.forEach((sourceRow) => {
+    const row = document.createElement("tr");
+    sourceRow.forEach((value) => {
+      const cell = createTableCell();
+      fillTableCellText(cell, value);
+      row.appendChild(cell);
+    });
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
+  return table;
+}
+
+function pastedTableFromClipboard(clipboardData) {
+  if (!clipboardData) return null;
+  return pastedTableFromHtml(clipboardData.getData("text/html")) || pastedTableFromText(clipboardData.getData("text/plain"));
+}
+
+function insertPastedTable(table) {
+  restoreEditorSelection();
+  const afterLine = createBlankLine();
+  const fragment = document.createDocumentFragment();
+  fragment.append(table, afterLine);
+  insertNodeAtSelection(fragment);
+  placeCaretInTable(table);
+  const firstCell = table.querySelector("td");
+  if (firstCell) setTableSelection(firstCell, firstCell);
+  updateTableTools();
+  setTablePickerOpen(false);
+  scheduleSave();
+  pushEditorHistory();
+}
+
 function createMemoTable(rows, cols) {
   const table = document.createElement("table");
   table.className = "memo-table";
@@ -1175,7 +1656,7 @@ function createMemoTable(rows, cols) {
   return table;
 }
 
-function placeCaretInCell(cell) {
+function placeCaretInCell(cell, options = {}) {
   if (!cell) return;
   editor.focus();
   const range = document.createRange();
@@ -1185,6 +1666,8 @@ function placeCaretInCell(cell) {
   selection.removeAllRanges();
   selection.addRange(range);
   rememberEditorSelection();
+  if (options.preserveTableSelection) renderTableSelection();
+  else setTableSelection(cell, cell);
   updateTableTools();
 }
 
@@ -1213,11 +1696,32 @@ function selectedTableCell() {
   return selectedCell && editor.contains(selectedCell) ? selectedCell : null;
 }
 
+function activeTableSelectionCells() {
+  if (!tableSelectionState?.table || !editor.contains(tableSelectionState.table)) {
+    tableSelectionState = null;
+    return [];
+  }
+  const cells = uniqueCells(tableSelectionState.cells).filter((cell) => editor.contains(cell));
+  if (!cells.length) tableSelectionState = null;
+  return cells;
+}
+
+function activeTableSelectionCell() {
+  return tableSelectionState?.activeCell && editor.contains(tableSelectionState.activeCell)
+    ? tableSelectionState.activeCell
+    : null;
+}
+
 function currentTableCell() {
   const selectedCell = selectedTableCell();
   if (selectedCell && editor.contains(selectedCell)) {
     lastTableCell = selectedCell;
     return selectedCell;
+  }
+  const activeCell = activeTableSelectionCell();
+  if (activeCell) {
+    lastTableCell = activeCell;
+    return activeCell;
   }
   return lastTableCell && editor.contains(lastTableCell) ? lastTableCell : null;
 }
@@ -1232,16 +1736,69 @@ function setTableToolsOpen(open) {
 
 function updateTableTools() {
   const cell = selectedTableCell();
-  if (cell) lastTableCell = cell;
-  setTableToolsOpen(Boolean(cell));
+  const existingCells = activeTableSelectionCells();
+
+  if (cell) {
+    lastTableCell = cell;
+    const table = cell.closest(".memo-table");
+    const keepRange =
+      existingCells.length > 1 &&
+      tableSelectionState?.table === table &&
+      existingCells.includes(cell);
+    if (!keepRange && !tableDragSelectState) {
+      const nativeCells = nativeSelectedTableCells(table);
+      if (nativeCells.length > 1) setTableSelection(nativeCells[0], nativeCells[nativeCells.length - 1], nativeCells);
+      else setTableSelection(cell, cell);
+    } else {
+      renderTableSelection();
+    }
+    setTableToolsOpen(true);
+    return;
+  }
+
+  if (existingCells.length) {
+    renderTableSelection();
+    setTableToolsOpen(true);
+    return;
+  }
+
+  setTableToolsOpen(false);
 }
 
 function tableCells(table) {
   return Array.from(table?.querySelectorAll("td") || []);
 }
 
-function selectedTableCells() {
-  const table = currentMemoTable();
+function stripTransientTableSelection(root) {
+  root.querySelectorAll(".memo-table.table-selected").forEach((table) => {
+    table.classList.remove("table-selected");
+    if (!table.getAttribute("class")) table.removeAttribute("class");
+  });
+  root.querySelectorAll(".memo-table-cell-selected, .memo-table-cell-active").forEach((cell) => {
+    cell.classList.remove("memo-table-cell-selected", "memo-table-cell-active");
+    if (!cell.getAttribute("class")) cell.removeAttribute("class");
+  });
+}
+
+function clearTableSelectionClasses() {
+  editor.querySelectorAll(".memo-table.table-selected").forEach((table) => {
+    table.classList.remove("table-selected");
+  });
+  editor.querySelectorAll(".memo-table-cell-selected, .memo-table-cell-active").forEach((cell) => {
+    cell.classList.remove("memo-table-cell-selected", "memo-table-cell-active");
+  });
+}
+
+function clearTableSelection(options = {}) {
+  tableSelectionState = null;
+  tableDragSelectState = null;
+  clearTableSelectionClasses();
+  editor.classList.remove("table-selecting");
+  if (!options.keepLastCell) lastTableCell = null;
+  if (!options.keepTools) setTableToolsOpen(false);
+}
+
+function nativeSelectedTableCells(table) {
   const selection = window.getSelection();
   if (!table || !selection || !selection.rangeCount) return [];
   const range = selection.getRangeAt(0);
@@ -1249,9 +1806,20 @@ function selectedTableCells() {
     try {
       return range.intersectsNode(cell);
     } catch {
-      return cell === currentTableCell();
+      return false;
     }
   });
+}
+
+function selectedTableCells() {
+  const activeCells = activeTableSelectionCells();
+  if (activeCells.length) return activeCells;
+
+  const table = currentMemoTable();
+  const nativeCells = nativeSelectedTableCells(table);
+  if (nativeCells.length) return nativeCells;
+  const cell = currentTableCell();
+  return cell ? [cell] : [];
 }
 
 function targetTableCells() {
@@ -1287,6 +1855,60 @@ function buildTableGrid(table) {
 
 function uniqueCells(cells) {
   return [...new Set(cells.filter(Boolean))];
+}
+
+function tableCellsBetween(anchorCell, focusCell) {
+  const table = anchorCell?.closest(".memo-table");
+  if (!table || focusCell?.closest(".memo-table") !== table) return [];
+
+  const { grid, meta } = buildTableGrid(table);
+  const anchor = meta.get(anchorCell);
+  const focus = meta.get(focusCell);
+  if (!anchor || !focus) return [anchorCell];
+
+  const firstRow = Math.min(anchor.rowIndex, focus.rowIndex);
+  const firstCol = Math.min(anchor.colIndex, focus.colIndex);
+  const lastRow = Math.max(anchor.rowIndex + anchor.rowSpan - 1, focus.rowIndex + focus.rowSpan - 1);
+  const lastCol = Math.max(anchor.colIndex + anchor.colSpan - 1, focus.colIndex + focus.colSpan - 1);
+  const cells = [];
+
+  for (let rowIndex = firstRow; rowIndex <= lastRow; rowIndex += 1) {
+    for (let colIndex = firstCol; colIndex <= lastCol; colIndex += 1) {
+      if (grid[rowIndex]?.[colIndex]) cells.push(grid[rowIndex][colIndex]);
+    }
+  }
+
+  return uniqueCells(cells);
+}
+
+function setTableSelection(anchorCell, focusCell, explicitCells = null) {
+  const table = focusCell?.closest(".memo-table") || anchorCell?.closest(".memo-table");
+  if (!table || !editor.contains(table)) return;
+  const cells = uniqueCells(explicitCells || tableCellsBetween(anchorCell, focusCell));
+  if (!cells.length) return;
+
+  tableSelectionState = {
+    table,
+    anchorCell,
+    focusCell,
+    activeCell: focusCell || anchorCell,
+    cells
+  };
+  lastTableCell = tableSelectionState.activeCell;
+  renderTableSelection();
+}
+
+function renderTableSelection() {
+  clearTableSelectionClasses();
+  const cells = activeTableSelectionCells();
+  const table = tableSelectionState?.table;
+  if (!table || !cells.length) return;
+
+  cells.forEach((cell) => cell.classList.add("memo-table-cell-selected"));
+  const activeCell = activeTableSelectionCell() || cells[cells.length - 1];
+  activeCell?.classList.add("memo-table-cell-active");
+
+  if (cells.length === tableCells(table).length) table.classList.add("table-selected");
 }
 
 function isEffectivelyBlankCell(cell) {
@@ -1481,8 +2103,7 @@ function deleteTable() {
   if (!table) return;
   const blankLine = createBlankLine();
   table.replaceWith(blankLine);
-  lastTableCell = null;
-  setTableToolsOpen(false);
+  clearTableSelection();
   placeCaretInBlock(blankLine);
   scheduleSave();
   pushEditorHistory();
@@ -1547,6 +2168,64 @@ function handleTableKeydown(event) {
   }
   if (nextIndex < 0) nextIndex = cells.length - 1;
   placeCaretInCell(cells[nextIndex]);
+}
+
+function tableCellFromEventTarget(target) {
+  const cell = target instanceof Element ? target.closest(".memo-table td") : null;
+  return cell && editor.contains(cell) ? cell : null;
+}
+
+function tableCellFromPoint(x, y) {
+  return tableCellFromEventTarget(document.elementFromPoint(x, y));
+}
+
+function beginTableCellSelection(event) {
+  if (event.button !== 0) return;
+  const cell = tableCellFromEventTarget(event.target);
+  if (!cell) return;
+
+  tableDragSelectState = {
+    pointerId: event.pointerId,
+    anchorCell: cell,
+    focusCell: cell,
+    startX: event.clientX,
+    startY: event.clientY,
+    hasMoved: false
+  };
+  setTableSelection(cell, cell);
+  setTableToolsOpen(true);
+}
+
+function moveTableCellSelection(event) {
+  if (!tableDragSelectState) return;
+  const distance = Math.hypot(event.clientX - tableDragSelectState.startX, event.clientY - tableDragSelectState.startY);
+  if (distance > 4) {
+    tableDragSelectState.hasMoved = true;
+    editor.classList.add("table-selecting");
+  }
+  if (!tableDragSelectState.hasMoved) return;
+
+  const cell = tableCellFromPoint(event.clientX, event.clientY);
+  if (!cell || cell.closest(".memo-table") !== tableDragSelectState.anchorCell.closest(".memo-table")) return;
+  tableDragSelectState.focusCell = cell;
+  setTableSelection(tableDragSelectState.anchorCell, cell);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  event.preventDefault();
+}
+
+function endTableCellSelection(event) {
+  if (!tableDragSelectState) return;
+  const dragState = tableDragSelectState;
+  tableDragSelectState = null;
+  editor.classList.remove("table-selecting");
+  if (dragState.hasMoved) {
+    placeCaretInCell(dragState.focusCell, { preserveTableSelection: true });
+    renderTableSelection();
+    event?.preventDefault?.();
+  } else {
+    setTableSelection(dragState.anchorCell, dragState.anchorCell);
+  }
 }
 
 function isBlankEditorText(value) {
@@ -1616,12 +2295,13 @@ document.querySelectorAll(".tool-button").forEach((button) => {
 
 editor.addEventListener("input", () => {
   scheduleSave();
-  pushEditorHistory();
+  queueEditorHistory();
   rememberEditorSelection();
   updateToolbarCommandState();
   updateTableTools();
 });
 editor.addEventListener("keydown", handleEditorKeydown);
+editor.addEventListener("pointerdown", beginTableCellSelection);
 editor.addEventListener("keyup", () => {
   rememberEditorSelection();
   updateToolbarCommandState();
@@ -1650,6 +2330,9 @@ document.addEventListener("selectionchange", () => {
     updateTableTools();
   }
 });
+document.addEventListener("pointermove", moveTableCellSelection);
+document.addEventListener("pointerup", endTableCellSelection);
+document.addEventListener("pointercancel", endTableCellSelection);
 document.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -1665,8 +2348,7 @@ document.addEventListener("pointerdown", (event) => {
   if (editor.contains(target) || tableTools.contains(target) || tablePicker.contains(target) || tableButton.contains(target)) {
     return;
   }
-  lastTableCell = null;
-  setTableToolsOpen(false);
+  clearTableSelection();
 });
 titleInput.addEventListener("input", scheduleSave);
 attachButton.addEventListener("click", async () => {
@@ -1677,19 +2359,31 @@ undoButton.addEventListener("click", undoEditor);
 redoButton.addEventListener("click", redoEditor);
 bulletButton.addEventListener("click", () => execCommand("insertUnorderedList"));
 checkButton.addEventListener("click", insertChecklist);
-clearButton.addEventListener("click", clearEditorPreservingUndo);
+clearButton?.addEventListener("click", clearEditorPreservingUndo);
 backgroundButton?.addEventListener("click", editBackgroundForDetachedMemo);
 cropperStage?.addEventListener("pointerdown", beginCropDrag);
 cropperStage?.addEventListener("pointermove", moveCropDrag);
 cropperStage?.addEventListener("pointerup", endCropDrag);
 cropperStage?.addEventListener("pointercancel", endCropDrag);
+coverageBox?.addEventListener("dblclick", toggleCoverageImageMoveMode);
 cropperCancelButton?.addEventListener("click", closeBackgroundCropper);
 cropperResetButton?.addEventListener("click", () => {
-  if (backgroundCropperState) backgroundCropperState.initialCrop = { x: 0, y: 0, width: 1, height: 1 };
+  if (!backgroundCropperState) return;
+  if (backgroundCropperState.mode === "coverage") {
+    backgroundCropperState.initialPlacement = { top: 0, coverage: 1 };
+    backgroundCropperState.imagePositionX = 0.5;
+    backgroundCropperState.imagePositionY = 0.5;
+    backgroundCropperState.imageMoveMode = false;
+    updateCoverageModeTitle();
+    resetCoverageBox(true);
+    return;
+  }
+  backgroundCropperState.initialCrop = { x: 0, y: 0, width: 1, height: 1 };
   resetCropBox(true);
 });
+cropperClearBackgroundButton?.addEventListener("click", clearDetachedBackground);
 cropperApplyButton?.addEventListener("click", applyBackgroundCrop);
-document.addEventListener("paste", handleBackgroundPaste);
+document.addEventListener("paste", handleEditorPaste);
 window.addEventListener("resize", handleCropperWindowResize);
 tableButton.addEventListener("click", () => {
   rememberEditorSelection();
@@ -1720,7 +2414,7 @@ addTableColButton.addEventListener("click", addTableColumn);
 deleteTableRowButton.addEventListener("click", deleteTableRow);
 deleteTableColButton.addEventListener("click", deleteTableColumn);
 mergeTableCellsButton.addEventListener("click", mergeTableCells);
-mergeTableDownButton.addEventListener("click", mergeTableCellsDown);
+mergeTableDownButton?.addEventListener("click", mergeTableCellsDown);
 splitTableCellButton.addEventListener("click", splitTableCell);
 tableBorderColorInput.addEventListener("input", applyTableBorder);
 tableBorderWidthInput.addEventListener("input", applyTableBorder);
@@ -1752,6 +2446,11 @@ lineSpacingSelect.addEventListener("change", () => {
   applyLineSpacingToSelection(lineSpacingSelect.value);
 });
 window.addEventListener("beforeunload", () => {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  clearPendingEditorHistory();
   if (memo) window.memoEdge.updateDetachedMemo({ ...memo, title: titleInput.value, html: serializedEditorHtml() });
 });
 
