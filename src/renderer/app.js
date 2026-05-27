@@ -179,6 +179,7 @@ let temporarySettingsPanelWidth = null;
 let savedEditorRange = null;
 let handleDragState = null;
 let handleClickTimer = null;
+let sideTitleEditor = null;
 let lastTableCell = null;
 let tableSelectionState = null;
 let tableDragSelectState = null;
@@ -1224,7 +1225,9 @@ function handleTitle(memo, fallbackIndex) {
 
 function renderHandleLabel(button, text) {
   button.innerHTML = "";
-  Array.from(text).forEach((char) => {
+  const chars = Array.from(text);
+  button.classList.toggle("handle-label-long", chars.length > 4);
+  chars.forEach((char) => {
     const span = document.createElement("span");
     span.className = "handle-char";
     span.textContent = char;
@@ -1308,8 +1311,111 @@ function clearHandleClickTimer() {
   handleClickTimer = null;
 }
 
+function positionSideTitleEditor(input, button) {
+  const rect = button.getBoundingClientRect();
+  const edge = normalizeDockEdge(state.shell.dockEdge);
+  const gap = 12;
+  const sideSpace =
+    edge === "left"
+      ? rect.left - gap - 8
+      : edge === "right"
+        ? window.innerWidth - rect.right - gap - 8
+        : window.innerWidth - 16;
+  const width = Math.max(132, Math.min(240, sideSpace));
+  const height = 34;
+  let left = rect.right + gap;
+  let top = rect.top + rect.height / 2 - height / 2;
+
+  if (edge === "left") {
+    left = rect.left - width - gap;
+  } else if (edge === "top") {
+    left = rect.left + rect.width / 2 - width / 2;
+    top = rect.bottom + gap;
+  } else if (edge === "bottom") {
+    left = rect.left + rect.width / 2 - width / 2;
+    top = rect.top - height - gap;
+  }
+
+  input.style.width = `${width}px`;
+  input.style.left = `${clamp(left, 8, window.innerWidth - width - 8)}px`;
+  input.style.top = `${clamp(top, 8, window.innerHeight - height - 8)}px`;
+}
+
+function handleButtonForMemo(id) {
+  return Array.from(handleRail.querySelectorAll(".edge-handle")).find((button) => button.dataset.id === id) || null;
+}
+
+function finishSideTitleEdit(commit = true) {
+  if (!sideTitleEditor) return;
+  const { input, button, memoId, fallbackTitle, openedSideSpace } = sideTitleEditor;
+  sideTitleEditor = null;
+  button?.classList.remove("side-title-editing");
+  input.remove();
+  if (openedSideSpace) window.memoEdge.setSideTitleEditOpen?.(false);
+
+  if (!commit) return;
+  const memo = state.indexes.find((item) => item.id === memoId);
+  if (!memo) return;
+  memo.title = normalizeMemoTitle(input.value, fallbackTitle);
+  memo.updatedAt = Date.now();
+  if (memo.id === state.activeId) {
+    activeLabel.textContent = memo.title;
+    activeTitleInput.value = memo.title;
+  }
+  renderHandles();
+  renderAllMemoList();
+  renderIndexManager();
+  saveState();
+}
+
+async function startSideTitleEdit(id, fallbackIndex = 0, button = null) {
+  const memo = state.indexes.find((item) => item.id === id);
+  if (!memo || !button) return;
+  finishSideTitleEdit(false);
+  clearHandleClickTimer();
+  draggingHandle = false;
+  handleDragState = null;
+
+  let targetButton = button;
+  let openedSideSpace = false;
+  if (!expanded) {
+    await window.memoEdge.setSideTitleEditOpen?.(true);
+    openedSideSpace = true;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    targetButton = handleButtonForMemo(id) || button;
+  }
+
+  const fallbackTitle = `메모 ${fallbackIndex + 1}`;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "side-title-editor";
+  input.value = memo.title || fallbackTitle;
+  input.maxLength = MAX_TITLE_LENGTH;
+  input.setAttribute("aria-label", "메모 이름 변경");
+  document.body.appendChild(input);
+  targetButton.classList.add("side-title-editing");
+  sideTitleEditor = { input, button: targetButton, memoId: id, fallbackTitle, openedSideSpace };
+  positionSideTitleEditor(input, targetButton);
+
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finishSideTitleEdit(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      finishSideTitleEdit(false);
+    }
+  });
+  input.addEventListener("pointerdown", (event) => event.stopPropagation());
+  input.addEventListener("blur", () => finishSideTitleEdit(true));
+  input.focus({ preventScroll: true });
+  input.select();
+}
+
 function renderHandles() {
   clearHandleClickTimer();
+  finishSideTitleEdit(false);
   handleRail.innerHTML = "";
 
   floatingMemos().forEach((memo, index) => {
@@ -1326,31 +1432,21 @@ function renderHandles() {
 
     const fallbackTitle = `메모 ${index + 1}`;
     const memoTitle = memo.title || fallbackTitle;
-    button.title = `${memoTitle} - 더블클릭해서 제목 변경`;
-    button.setAttribute("aria-label", `${memoTitle}, 더블클릭해서 제목 변경`);
+    button.title = `${memoTitle} - 클릭해서 열기`;
+    button.setAttribute("aria-label", `${memoTitle}, 클릭해서 열기`);
 
     const bg = normalizeHexColor(memo.color, COLOR_PRESETS[index % COLOR_PRESETS.length]);
     button.style.setProperty("--handle-bg", bg);
     button.style.setProperty("--handle-text", readableTextColor(bg));
 
-    button.addEventListener("click", (event) => {
+    button.addEventListener("click", () => {
       if (draggingHandle) return;
       clearHandleClickTimer();
-      if (event.detail > 1) return;
       handleClickTimer = setTimeout(() => {
         handleClickTimer = null;
         selectMemo(memo.id);
         setExpanded(true);
       }, HANDLE_CLICK_DELAY_MS);
-    });
-
-    button.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      clearHandleClickTimer();
-      draggingHandle = false;
-      handleDragState = null;
-      renameMemoFromSide(memo.id, index);
     });
 
     button.addEventListener("pointerdown", (event) => {
@@ -1853,6 +1949,7 @@ function renderMemoSearchResults() {
 }
 
 async function setExpanded(nextExpanded) {
+  finishSideTitleEdit(false);
   expanded = Boolean(nextExpanded);
   syncShellLayoutClasses();
   appShell.classList.toggle("expanded", expanded);

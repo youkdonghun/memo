@@ -7,6 +7,7 @@ const { pathToFileURL } = require("url");
 
 const COLLAPSED_WIDTH = 36;
 const PANEL_WIDTH = 480;
+const SIDE_TITLE_EDIT_WIDTH = 260;
 const WINDOW_VERTICAL_MARGIN = 18;
 const BASE_HEIGHT = 520;
 const SETTINGS_HEIGHT = 720;
@@ -62,6 +63,7 @@ let followDisplayTimer = null;
 let isQuitting = false;
 let settingsOpen = false;
 let temporaryPanelWidth = null;
+let sideTitleEditOpen = false;
 let settingsSaveTimer = null;
 const detachedWindows = new Map();
 const detachedMemos = new Map();
@@ -396,12 +398,22 @@ function getWindowSize(display) {
   if (horizontal) {
     return {
       width: panelWidth,
-      height: expanded || settingsOpen ? COLLAPSED_WIDTH + panelHeight : COLLAPSED_WIDTH
+      height:
+        expanded || settingsOpen
+          ? COLLAPSED_WIDTH + panelHeight
+          : sideTitleEditOpen
+            ? COLLAPSED_WIDTH + SIDE_TITLE_EDIT_WIDTH
+            : COLLAPSED_WIDTH
     };
   }
 
   return {
-    width: expanded || settingsOpen ? COLLAPSED_WIDTH + panelWidth : COLLAPSED_WIDTH,
+    width:
+      expanded || settingsOpen
+        ? COLLAPSED_WIDTH + panelWidth
+        : sideTitleEditOpen
+          ? COLLAPSED_WIDTH + SIDE_TITLE_EDIT_WIDTH
+          : COLLAPSED_WIDTH,
     height: panelHeight
   };
 }
@@ -474,6 +486,7 @@ function loginItemOptions() {
 
 function setExpanded(nextExpanded, notifyRenderer = true) {
   expanded = Boolean(nextExpanded);
+  if (expanded) sideTitleEditOpen = false;
   if (!expanded) {
     settingsOpen = false;
     temporaryPanelWidth = null;
@@ -490,10 +503,18 @@ function setExpanded(nextExpanded, notifyRenderer = true) {
 
 function setSettingsOpen(nextOpen) {
   settingsOpen = Boolean(nextOpen) && expanded;
+  if (settingsOpen) sideTitleEditOpen = false;
   if (!settingsOpen) temporaryPanelWidth = null;
   refreshWindowBounds(true);
   applyWindowVisibility();
   return { ok: true, settingsOpen };
+}
+
+function setSideTitleEditOpen(nextOpen) {
+  sideTitleEditOpen = Boolean(nextOpen) && !expanded && !settingsOpen;
+  refreshWindowBounds(false);
+  applyWindowVisibility();
+  return { ok: true, sideTitleEditOpen };
 }
 
 function setTemporaryPanelWidth(nextWidth) {
@@ -822,6 +843,7 @@ ipcMain.handle("shell:set-expanded", (_, nextExpanded) => {
 
 ipcMain.handle("shell:set-settings-open", (_, nextOpen) => setSettingsOpen(nextOpen));
 ipcMain.handle("shell:set-temporary-panel-width", (_, nextWidth) => setTemporaryPanelWidth(nextWidth));
+ipcMain.handle("shell:set-side-title-edit-open", (_, nextOpen) => setSideTitleEditOpen(nextOpen));
 
 ipcMain.handle("shell:update-settings", (_, partialSettings = {}) => {
   settings = normalizeSettings(partialSettings);

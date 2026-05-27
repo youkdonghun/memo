@@ -268,6 +268,12 @@ button:not(:disabled):not(.edge-handle):active {
   cursor: grabbing;
 }
 
+.edge-handle.handle-label-long {
+  justify-content: flex-start;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
 .handle-slot.dragging {
   z-index: 8;
   opacity: 0.88;
@@ -358,7 +364,8 @@ button:not(:disabled):not(.edge-handle):active {
 
 .handle-char {
   width: 16px;
-  min-height: clamp(7px, 2.7vh, 13px);
+  min-height: 0;
+  height: 1em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -370,6 +377,35 @@ button:not(:disabled):not(.edge-handle):active {
 .edge-handle.active {
   border-color: var(--accent);
   box-shadow: 0 12px 30px rgba(28, 35, 50, 0.24);
+}
+
+.edge-handle.side-title-editing {
+  border-color: var(--accent);
+  box-shadow:
+    0 12px 30px rgba(28, 35, 50, 0.22),
+    0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.side-title-editor {
+  position: fixed;
+  z-index: 80;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 52%, rgba(34, 42, 64, 0.18));
+  border-radius: var(--radius-control);
+  outline: none;
+  background: rgba(255, 255, 255, 0.96);
+  color: #283044;
+  box-shadow: 0 14px 34px rgba(28, 35, 50, 0.2);
+  font-family: var(--common-font-family);
+  font-size: calc(var(--common-font-size) + 2px);
+  font-weight: 800;
+}
+
+.side-title-editor:focus {
+  box-shadow:
+    0 14px 34px rgba(28, 35, 50, 0.2),
+    0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .handle-delete-button {
