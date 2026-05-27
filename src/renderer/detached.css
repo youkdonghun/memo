@@ -5,8 +5,14 @@
   --memo-font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --memo-font-size: 15px;
   --memo-line-height: 1.5;
+  --memo-bg-image: none;
+  --memo-bg-opacity: 0;
+  --memo-panel-bg: var(--note-bg);
   --radius-control: 10px;
   --radius-compact: 9px;
+  --motion-fast: 140ms;
+  --motion-normal: 190ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 * {
@@ -19,7 +25,7 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: var(--note-bg);
+  background: var(--memo-panel-bg);
   color: var(--note-text);
   font-family: var(--memo-font-family);
 }
@@ -28,14 +34,72 @@ button,
 input,
 select {
   font: inherit;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+@keyframes surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes surface-enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 .detached-shell {
+  position: relative;
   width: 100vw;
   height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--note-bg);
+}
+
+.detached-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--memo-bg-image);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  opacity: var(--memo-bg-opacity);
+  pointer-events: none;
+}
+
+.detached-shell > * {
+  position: relative;
+  z-index: 1;
 }
 
 .detached-header,
@@ -165,6 +229,82 @@ select {
   flex: 0 0 84px;
 }
 
+input.toolbar-size-select,
+input.toolbar-line-select {
+  padding: 0 6px;
+}
+
+.toolbar-color-field {
+  width: 34px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: var(--radius-compact);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--note-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.toolbar-color-field input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.text-color-palette {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+  background: color-mix(in srgb, var(--note-bg) 84%, #ffffff);
+}
+
+.text-color-palette:not(.hidden) {
+  animation: surface-enter var(--motion-fast) var(--motion-ease) both;
+}
+
+.text-color-palette.hidden {
+  display: none;
+}
+
+.text-color-swatch,
+.text-color-custom {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--note-text) 20%, transparent);
+  border-radius: 999px;
+  background: var(--swatch-color, #ffffff);
+  color: var(--note-text);
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.text-color-custom {
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.text-color-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .table-picker,
 .table-tools {
   display: flex;
@@ -172,8 +312,16 @@ select {
   flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+  flex: 0 0 auto;
+  border-top: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+  border-bottom: 0;
   background: color-mix(in srgb, var(--note-bg) 82%, #ffffff);
+  box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.table-picker:not(.hidden),
+.table-tools:not(.hidden) {
+  animation: surface-enter-up var(--motion-fast) var(--motion-ease) both;
 }
 
 .table-picker.hidden,
@@ -234,8 +382,7 @@ select {
 }
 
 .detached-editor * {
-  font-family: var(--memo-font-family) !important;
-  line-height: var(--memo-line-height);
+  font-family: inherit;
 }
 
 .memo-table {
@@ -250,7 +397,7 @@ select {
   min-height: 28px;
   border: 1px solid color-mix(in srgb, var(--note-text) 25%, transparent);
   padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.34);
+  background: #ffffff;
   vertical-align: top;
 }
 
@@ -293,4 +440,111 @@ select {
 .check-item[data-checked="true"] .check-text {
   text-decoration: line-through;
   opacity: 0.65;
+}
+
+.cropper-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(3px);
+}
+
+.cropper-overlay.hidden {
+  display: none;
+}
+
+.cropper-panel {
+  width: min(560px, 100%);
+  max-height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(220px, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: var(--radius-control);
+  background: #f8fafc;
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.24);
+  animation: surface-enter var(--motion-normal) var(--motion-ease) both;
+}
+
+.cropper-header,
+.cropper-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cropper-stage {
+  position: relative;
+  min-height: 220px;
+  max-height: 58vh;
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  background:
+    linear-gradient(45deg, rgba(148, 163, 184, 0.22) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(148, 163, 184, 0.22) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.22) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.22) 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+  touch-action: none;
+}
+
+.cropper-stage img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cropper-box {
+  position: absolute;
+  border: 2px solid #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 0 0 9999px rgba(15, 23, 42, 0.42),
+    0 0 0 1px rgba(15, 23, 42, 0.35);
+  cursor: move;
+  touch-action: none;
+}
+
+.cropper-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.22);
+}
+
+.cropper-handle.nw {
+  top: -8px;
+  left: -8px;
+  cursor: nwse-resize;
+}
+
+.cropper-handle.ne {
+  top: -8px;
+  right: -8px;
+  cursor: nesw-resize;
+}
+
+.cropper-handle.sw {
+  bottom: -8px;
+  left: -8px;
+  cursor: nesw-resize;
+}
+
+.cropper-handle.se {
+  right: -8px;
+  bottom: -8px;
+  cursor: nwse-resize;
 }

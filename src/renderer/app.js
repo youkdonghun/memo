@@ -1,11 +1,12 @@
 const STORAGE_KEY = "memo-bom-state-v2";
 const LEGACY_STORAGE_KEY = "memo-bom-state-v1";
-const STATE_VERSION = 8;
+const STATE_VERSION = 9;
 const MAX_FLOATING = 5;
 const HOVER_DELAY_MS = 200;
 const DEFAULT_CYCLE_SHORTCUT = "CommandOrControl+Shift+D";
 const DEFAULT_HIDE_SHORTCUT = "CommandOrControl+Shift+F";
 const DEFAULT_FONT_SIZE = 15;
+const DEFAULT_COMMON_FONT_SIZE = 12;
 const DEFAULT_FONT_FAMILY = "Gulim";
 const DEFAULT_LINE_SPACING = 1.5;
 const DEFAULT_PANEL_WIDTH = 480;
@@ -18,9 +19,22 @@ const MAX_TITLE_LENGTH = 80;
 const DETACH_DRAG_THRESHOLD = 78;
 const CHECK_TEXT_PLACEHOLDER = "\u200b";
 const HANDLE_TITLE_PREFIX_LENGTH = 5;
-const FONT_SIZE_OPTIONS = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32];
-const LINE_SPACING_OPTIONS = [1, 1.15, 1.5, 2, 2.5, 3];
+const FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64, 72, 96];
+const LINE_SPACING_OPTIONS = [0.8, 1, 1.15, 1.5, 2, 2.5, 3, 3.5, 4];
 const HANDLE_REORDER_THRESHOLD = 8;
+const MAX_RECENT_TEXT_COLORS = 6;
+const TEXT_COLOR_PRESETS = [
+  "#283044",
+  "#111827",
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#ffffff"
+];
 
 const FONT_LABELS = {
   Gulim: "굴림체",
@@ -61,7 +75,7 @@ const defaultShellSettings = {
   hideShortcut: DEFAULT_HIDE_SHORTCUT,
   anchor: "middle",
   manualYOffset: 0,
-  followCursorDisplay: true,
+  followCursorDisplay: false,
   targetDisplayId: null
 };
 
@@ -72,11 +86,15 @@ const defaultMemoDefaults = {
 };
 
 const defaultAppPrefs = {
-  showLaunchGuideOnStartup: true,
+  showLaunchGuideOnStartup: false,
+  toolbarCollapsed: false,
+  commonFontFamily: DEFAULT_FONT_FAMILY,
+  commonFontSize: DEFAULT_COMMON_FONT_SIZE,
   startupDefaultApplied: false,
   startupUserChoiceSet: false,
-  welcomeMemoApplied: false,
-  initialSingleMemoApplied: false
+  welcomeMemoApplied: true,
+  initialSingleMemoApplied: true,
+  recentTextColors: []
 };
 
 function createId() {
@@ -92,6 +110,10 @@ function createMemo(index = 0, defaults = defaultMemoDefaults) {
     fontSize: memoDefaults.fontSize,
     fontFamily: memoDefaults.fontFamily,
     lineSpacing: memoDefaults.lineSpacing,
+    backgroundImage: "",
+    backgroundSourceImage: "",
+    backgroundCrop: null,
+    backgroundOpacity: 0,
     html: "",
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -130,6 +152,7 @@ let expanded = false;
 let saveTimer = null;
 let draggingHandle = false;
 let systemFonts = [DEFAULT_FONT_FAMILY, "GulimChe", "Malgun Gothic", "Arial", "Calibri", "Consolas"];
+let customFonts = [];
 let editorHistory = [];
 let editorHistoryIndex = -1;
 let applyingHistory = false;
@@ -140,6 +163,10 @@ let savedEditorRange = null;
 let handleDragState = null;
 let lastTableCell = null;
 let detachedMemoPlacements = new Map();
+let pendingNudgeDelta = 0;
+let nudgeFrame = null;
+let railPositionDragState = null;
+let backgroundCropperState = null;
 
 const appShell = document.getElementById("appShell");
 const handleRail = document.getElementById("handleRail");
@@ -148,6 +175,7 @@ const activeTitleInput = document.getElementById("activeTitleInput");
 const activeLabel = document.getElementById("activeLabel");
 const activeSubtitle = document.getElementById("activeSubtitle");
 const allMemosButton = document.getElementById("allMemosButton");
+const activePopupButton = document.getElementById("activePopupButton");
 const memoListPanel = document.getElementById("memoListPanel");
 const closeMemoListButton = document.getElementById("closeMemoListButton");
 const allMemoList = document.getElementById("allMemoList");
@@ -155,6 +183,7 @@ const editor = document.getElementById("editor");
 const panelResizeGrip = document.getElementById("panelResizeGrip");
 const saveStatus = document.getElementById("saveStatus");
 const collapseButton = document.getElementById("collapseButton");
+const toolbarToggleButton = document.getElementById("toolbarToggleButton");
 const settingsButton = document.getElementById("settingsButton");
 const deleteActiveMemoButton = document.getElementById("deleteActiveMemoButton");
 const closeSettingsButton = document.getElementById("closeSettingsButton");
@@ -184,6 +213,16 @@ const tableCellColorInput = document.getElementById("tableCellColorInput");
 const tableFillColorInput = document.getElementById("tableFillColorInput");
 const clearTableCellColorButton = document.getElementById("clearTableCellColorButton");
 const deleteTableButton = document.getElementById("deleteTableButton");
+const textColorInput = document.getElementById("textColorInput");
+const textColorPalette = document.getElementById("textColorPalette");
+const backgroundButton = document.getElementById("backgroundButton");
+const backgroundCropper = document.getElementById("backgroundCropper");
+const cropperStage = document.getElementById("cropperStage");
+const cropperImage = document.getElementById("cropperImage");
+const cropperBox = document.getElementById("cropperBox");
+const cropperApplyButton = document.getElementById("cropperApplyButton");
+const cropperCancelButton = document.getElementById("cropperCancelButton");
+const cropperResetButton = document.getElementById("cropperResetButton");
 const fontSizeToolbarSelect = document.getElementById("fontSizeToolbarSelect");
 const fontFamilyToolbarSelect = document.getElementById("fontFamilyToolbarSelect");
 const lineSpacingToolbarSelect = document.getElementById("lineSpacingToolbarSelect");
@@ -196,8 +235,11 @@ const panelWidthInput = document.getElementById("panelWidthInput");
 const panelHeightInput = document.getElementById("panelHeightInput");
 const panelPositionInput = document.getElementById("panelPositionInput");
 const defaultFontFamilySelect = document.getElementById("defaultFontFamilySelect");
+const commonFontFamilySelect = document.getElementById("commonFontFamilySelect");
+const commonFontSizeSelect = document.getElementById("commonFontSizeSelect");
 const defaultFontSizeSelect = document.getElementById("defaultFontSizeSelect");
 const defaultLineSpacingSelect = document.getElementById("defaultLineSpacingSelect");
+const importFontButton = document.getElementById("importFontButton");
 const cycleShortcutInput = document.getElementById("cycleShortcutInput");
 const hideShortcutInput = document.getElementById("hideShortcutInput");
 const startupInput = document.getElementById("startupInput");
@@ -210,6 +252,8 @@ const floatingLimitText = document.getElementById("floatingLimitText");
 const exportDataButton = document.getElementById("exportDataButton");
 const importDataButton = document.getElementById("importDataButton");
 const resetSettingsButton = document.getElementById("resetSettingsButton");
+const footerOpacityInput = document.getElementById("footerOpacityInput");
+const footerOpacityValue = document.getElementById("footerOpacityValue");
 const launchGuide = document.getElementById("launchGuide");
 const launchGuideMessage = document.getElementById("launchGuideMessage");
 const launchGuideCycle = document.getElementById("launchGuideCycle");
@@ -242,11 +286,15 @@ function migrateLegacyState(raw) {
   const indexes = raw.indexes.map((item, index) => ({
     id: createId(),
     title: normalizeMemoTitle(item.title, `메모 ${index + 1}`),
-    color: normalizeHexColor(item.color || presetColorFromTheme(item.theme), COLOR_PRESETS[index % COLOR_PRESETS.length]),
-    fontSize: normalizeFontSize(item.fontSize),
-    fontFamily: normalizeFontFamily(item.fontFamily),
-    lineSpacing: normalizeLineSpacing(item.lineSpacing),
-    html: typeof item.html === "string" ? item.html : "",
+        color: normalizeHexColor(item.color || presetColorFromTheme(item.theme), COLOR_PRESETS[index % COLOR_PRESETS.length]),
+        fontSize: normalizeFontSize(item.fontSize),
+        fontFamily: normalizeFontFamily(item.fontFamily),
+        lineSpacing: normalizeLineSpacing(item.lineSpacing),
+        backgroundImage: normalizeAssetUrl(item.backgroundImage),
+        backgroundSourceImage: normalizeAssetUrl(item.backgroundSourceImage || item.backgroundImage),
+        backgroundCrop: normalizeBackgroundCrop(item.backgroundCrop),
+        backgroundOpacity: normalizeOpacity(item.backgroundOpacity),
+        html: typeof item.html === "string" ? item.html : "",
     createdAt: Date.now(),
     updatedAt: Date.now()
   }));
@@ -276,6 +324,10 @@ function normalizeState(raw) {
         fontSize: normalizeFontSize(item.fontSize),
         fontFamily: normalizeStoredFontFamily(item.fontFamily, sourceVersion),
         lineSpacing: normalizeLineSpacing(item.lineSpacing),
+        backgroundImage: normalizeAssetUrl(item.backgroundImage),
+        backgroundSourceImage: normalizeAssetUrl(item.backgroundSourceImage || item.backgroundImage),
+        backgroundCrop: normalizeBackgroundCrop(item.backgroundCrop),
+        backgroundOpacity: normalizeOpacity(item.backgroundOpacity),
         html: typeof item.html === "string" ? item.html : "",
         createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
         updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
@@ -327,13 +379,46 @@ function normalizeHexColor(value, fallback) {
 
 function normalizeFontSize(value) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? clamp(Math.round(numeric), 10, 32) : DEFAULT_FONT_SIZE;
+  return Number.isFinite(numeric) ? clamp(Math.round(numeric), 8, 96) : DEFAULT_FONT_SIZE;
 }
 
 function normalizeLineSpacing(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return DEFAULT_LINE_SPACING;
-  return Math.round(clamp(numeric, 1, 3) * 100) / 100;
+  return Math.round(clamp(numeric, 0.8, 4) * 100) / 100;
+}
+
+function normalizeCommonFontSize(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? clamp(Math.round(numeric), 9, 24) : DEFAULT_COMMON_FONT_SIZE;
+}
+
+function normalizeOpacity(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(clamp(numeric, 0, 1) * 100) / 100 : 0;
+}
+
+function normalizeAssetUrl(value) {
+  return typeof value === "string" && /^(file|https?|data):/i.test(value.trim()) ? value.trim() : "";
+}
+
+function normalizeBackgroundCrop(value) {
+  if (!value || typeof value !== "object") return null;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  const width = Number(value.width);
+  const height = Number(value.height);
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  const normalizedX = clamp(x, 0, 0.99);
+  const normalizedY = clamp(y, 0, 0.99);
+  const normalizedWidth = clamp(width, 0.01, 1 - normalizedX);
+  const normalizedHeight = clamp(height, 0.01, 1 - normalizedY);
+  return {
+    x: Math.round(normalizedX * 10000) / 10000,
+    y: Math.round(normalizedY * 10000) / 10000,
+    width: Math.round(normalizedWidth * 10000) / 10000,
+    height: Math.round(normalizedHeight * 10000) / 10000
+  };
 }
 
 function isBrokenFontName(value) {
@@ -387,8 +472,10 @@ function normalizeShellSettings(value = {}) {
     edgeOffset,
     anchor: anchorAlias,
     manualYOffset: edgeOffset,
-    lengthMode: ["short", "normal", "long", "custom"].includes(value.lengthMode)
+    lengthMode: ["normal", "long", "custom"].includes(value.lengthMode)
       ? value.lengthMode
+      : value.lengthMode === "short"
+        ? "normal"
       : defaultShellSettings.lengthMode,
     panelWidth: normalizePanelWidth(value.panelWidth),
     panelHeight: normalizePanelHeight(value.panelHeight),
@@ -400,7 +487,7 @@ function normalizeShellSettings(value = {}) {
       typeof value.hideShortcut === "string" && value.hideShortcut.trim()
         ? value.hideShortcut.trim()
         : DEFAULT_HIDE_SHORTCUT,
-    followCursorDisplay: value.followCursorDisplay !== false,
+    followCursorDisplay: value.followCursorDisplay === true,
     targetDisplayId: typeof value.targetDisplayId === "number" ? value.targetDisplayId : null
   };
 }
@@ -413,15 +500,30 @@ function normalizeMemoDefaults(value) {
   };
 }
 
+function normalizeTextColorList(value) {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .map((color) => normalizeHexColor(color, ""))
+        .filter(Boolean)
+    )
+  ].slice(0, MAX_RECENT_TEXT_COLORS);
+}
+
 function normalizeAppPrefs(value = {}) {
   return {
     ...defaultAppPrefs,
     ...value,
-    showLaunchGuideOnStartup: value.showLaunchGuideOnStartup !== false,
+    showLaunchGuideOnStartup: false,
+    toolbarCollapsed: Boolean(value.toolbarCollapsed),
+    commonFontFamily: normalizeFontFamily(value.commonFontFamily),
+    commonFontSize: normalizeCommonFontSize(value.commonFontSize),
     startupDefaultApplied: Boolean(value.startupDefaultApplied),
     startupUserChoiceSet: Boolean(value.startupUserChoiceSet),
-    welcomeMemoApplied: Boolean(value.welcomeMemoApplied),
-    initialSingleMemoApplied: Boolean(value.initialSingleMemoApplied)
+    welcomeMemoApplied: true,
+    initialSingleMemoApplied: true,
+    recentTextColors: normalizeTextColorList(value.recentTextColors)
   };
 }
 
@@ -440,9 +542,32 @@ function fontFamilyCss(value) {
     .join(", ");
 }
 
+function fontFaceCssString(value) {
+  return JSON.stringify(String(value || "").replace(/["\\]/g, ""));
+}
+
+function registerCustomFonts(fonts = customFonts) {
+  customFonts = Array.isArray(fonts)
+    ? fonts
+        .filter((font) => font && typeof font.family === "string" && typeof font.url === "string")
+        .map((font) => ({ family: normalizeFontFamily(font.family), url: font.url }))
+    : [];
+
+  let style = document.getElementById("customFontFaces");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "customFontFaces";
+    document.head.appendChild(style);
+  }
+  style.textContent = customFonts
+    .map((font) => `@font-face{font-family:${fontFaceCssString(font.family)};src:url("${font.url.replace(/"/g, "%22")}");font-display:swap;}`)
+    .join("\n");
+}
+
 function applyCommonTypography() {
-  const family = fontFamilyCss(state.memoDefaults?.fontFamily || DEFAULT_FONT_FAMILY);
+  const family = fontFamilyCss(state.prefs?.commonFontFamily || DEFAULT_FONT_FAMILY);
   document.documentElement.style.setProperty("--common-font-family", family);
+  document.documentElement.style.setProperty("--common-font-size", `${normalizeCommonFontSize(state.prefs?.commonFontSize)}px`);
 }
 
 function syncShellLayoutClasses() {
@@ -457,9 +582,25 @@ function syncShellLayoutClasses() {
     "visibility-shortcutOnly"
   );
   appShell.classList.add(`dock-${shell.dockEdge}`, `visibility-${shell.visibilityMode}`);
+  appShell.classList.toggle("position-custom", shell.edgeAnchor === "custom");
   appShell.dataset.dockEdge = shell.dockEdge;
   appShell.dataset.visibilityMode = shell.visibilityMode;
+  if (handleRail) {
+    handleRail.classList.toggle("position-draggable", shell.edgeAnchor === "custom");
+    handleRail.title = shell.edgeAnchor === "custom" ? "빈 영역을 드래그해서 위치를 이동" : "";
+  }
   document.documentElement.style.setProperty("--panel-width", `${normalizePanelWidth(shell.panelWidth)}px`);
+  syncToolbarVisibility();
+}
+
+function syncToolbarVisibility() {
+  const collapsed = Boolean(state.prefs?.toolbarCollapsed);
+  appShell.classList.toggle("toolbar-collapsed", collapsed);
+  if (toolbarToggleButton) {
+    toolbarToggleButton.classList.toggle("active", !collapsed);
+    toolbarToggleButton.title = collapsed ? "서식 도구 보이기" : "서식 도구 숨기기";
+    toolbarToggleButton.setAttribute("aria-pressed", String(!collapsed));
+  }
 }
 
 function isHorizontalDock() {
@@ -470,27 +611,39 @@ function isHorizontalDock() {
 function fontOptionsWithCurrent(currentFont) {
   return [
     ...new Set(
-      [DEFAULT_FONT_FAMILY, normalizeFontFamily(currentFont), ...systemFonts.map(normalizeFontFamily)]
+      [
+        DEFAULT_FONT_FAMILY,
+        normalizeFontFamily(currentFont),
+        ...customFonts.map((font) => normalizeFontFamily(font.family)),
+        ...systemFonts.map(normalizeFontFamily)
+      ]
         .filter((font) => font && !isBrokenFontName(font))
     )
   ];
 }
 
 function populateFontFamilySelect(select, currentFont) {
+  if (!select) return;
   const current = normalizeFontFamily(currentFont);
   select.innerHTML = "";
   fontOptionsWithCurrent(current).forEach((font) => {
     const option = document.createElement("option");
     option.value = font;
     option.textContent = FONT_LABELS[font] || font;
+    option.style.fontFamily = fontFamilyCss(font);
     select.appendChild(option);
   });
   select.value = current;
-  select.style.fontFamily = "var(--common-font-family)";
+  select.style.fontFamily = fontFamilyCss(current);
 }
 
 function populateFontSizeSelect(select, currentSize) {
+  if (!select) return;
   const current = normalizeFontSize(currentSize);
+  if (select.tagName === "INPUT") {
+    select.value = String(current);
+    return;
+  }
   const options = FONT_SIZE_OPTIONS.includes(current)
     ? FONT_SIZE_OPTIONS
     : [...FONT_SIZE_OPTIONS, current].sort((a, b) => a - b);
@@ -506,7 +659,12 @@ function populateFontSizeSelect(select, currentSize) {
 }
 
 function populateLineSpacingSelect(select, currentSpacing) {
+  if (!select) return;
   const current = normalizeLineSpacing(currentSpacing);
+  if (select.tagName === "INPUT") {
+    select.value = String(current);
+    return;
+  }
   const options = LINE_SPACING_OPTIONS.includes(current)
     ? LINE_SPACING_OPTIONS
     : [...LINE_SPACING_OPTIONS, current].sort((a, b) => a - b);
@@ -594,6 +752,7 @@ function beginPanelResize(event) {
 
   panelResizeState = {
     axis,
+    edge: event.currentTarget?.dataset.resizeEdge || "",
     startY: event.screenY,
     startX: event.screenX,
     startWidth: panelRect?.width || normalizePanelWidth(state.shell.panelWidth),
@@ -619,12 +778,11 @@ function beginPanelResize(event) {
 function handlePanelResizeMove(event) {
   if (!panelResizeState) return;
   event.preventDefault();
-  const edge = normalizeDockEdge(state.shell.dockEdge);
-  const deltaY = edge === "bottom" ? panelResizeState.startY - event.screenY : event.screenY - panelResizeState.startY;
-  const deltaX =
-    edge === "right"
-      ? panelResizeState.startX - event.screenX
-      : event.screenX - panelResizeState.startX;
+  const pointerDeltaX = event.screenX - panelResizeState.startX;
+  const pointerDeltaY = event.screenY - panelResizeState.startY;
+  const edge = panelResizeState.edge;
+  const deltaY = edge.includes("top") ? -pointerDeltaY : pointerDeltaY;
+  const deltaX = edge.includes("left") ? -pointerDeltaX : pointerDeltaX;
   const nextSize = {
     width: panelResizeState.startWidth,
     height: panelResizeState.startHeight
@@ -683,6 +841,33 @@ function accentColor(hex) {
     g: rgb.g * darken,
     b: rgb.b * darken
   });
+}
+
+function rgbaString(hex, alpha = 1) {
+  const rgb = hexToRgb(hex);
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${clamp(alpha, 0, 1)})`;
+}
+
+function formatOpacityPercent(value) {
+  return `${Math.round(normalizeOpacity(value) * 100)}%`;
+}
+
+function backgroundTransparencyState(memo) {
+  const color = normalizeHexColor(memo?.color, "#fff4b8");
+  const backgroundImage = normalizeAssetUrl(memo?.backgroundImage);
+  const transparency = normalizeOpacity(memo?.backgroundOpacity);
+  return {
+    color,
+    backgroundImage,
+    imageOpacity: backgroundImage ? 1 - transparency : 0,
+    panelColorAlpha: backgroundImage ? 0 : 1 - transparency
+  };
+}
+
+function syncFooterOpacity(value) {
+  const opacity = normalizeOpacity(value);
+  if (footerOpacityInput) footerOpacityInput.value = String(opacity);
+  if (footerOpacityValue) footerOpacityValue.textContent = `투명도 ${formatOpacityPercent(opacity)}`;
 }
 
 function saveState() {
@@ -762,40 +947,14 @@ async function getCurrentUserName() {
 
 async function applyInitialSingleMemoIfNeeded() {
   state.prefs = normalizeAppPrefs(state.prefs);
-  if (state.prefs.initialSingleMemoApplied) return false;
-
-  const memo = createMemo(0, state.memoDefaults);
-  memo.title = "메모 1";
-  memo.html = createWelcomeMemoHtml(await getCurrentUserName());
-  memo.createdAt = Date.now();
-  memo.updatedAt = Date.now();
-
-  state.indexes = [memo];
-  state.activeId = memo.id;
-  state.floatingIds = [memo.id];
   state.prefs.initialSingleMemoApplied = true;
   state.prefs.welcomeMemoApplied = true;
-  return true;
+  return false;
 }
 
 async function applyWelcomeMemoIfNeeded() {
   state.prefs = normalizeAppPrefs(state.prefs);
-  if (await applyInitialSingleMemoIfNeeded()) return;
-  if (state.prefs.welcomeMemoApplied) return;
-
-  const firstMemo = state.indexes[0];
-  if (!firstMemo) {
-    state.prefs.welcomeMemoApplied = true;
-    return;
-  }
-
-  if (!isEmptyMemoHtml(firstMemo.html)) {
-    state.prefs.welcomeMemoApplied = true;
-    return;
-  }
-
-  firstMemo.html = createWelcomeMemoHtml(await getCurrentUserName());
-  firstMemo.updatedAt = Date.now();
+  await applyInitialSingleMemoIfNeeded();
   state.prefs.welcomeMemoApplied = true;
 }
 
@@ -841,6 +1000,10 @@ function serializedEditorHtml() {
   clone.querySelectorAll(".check-text").forEach((text) => {
     text.textContent = text.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
   });
+  clone.querySelectorAll(".typing-style-anchor").forEach((anchor) => {
+    anchor.textContent = anchor.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
+    if (!anchor.textContent.trim() && !anchor.querySelector("br, img, table")) anchor.remove();
+  });
   return clone.innerHTML;
 }
 
@@ -881,11 +1044,14 @@ function redoEditor() {
 }
 
 function applyMemoTheme(memo) {
-  const color = normalizeHexColor(memo.color, "#fff4b8");
+  const { color, backgroundImage, imageOpacity, panelColorAlpha } = backgroundTransparencyState(memo);
   const text = readableTextColor(color);
   document.documentElement.style.setProperty("--note-bg", color);
   document.documentElement.style.setProperty("--note-text", text);
   document.documentElement.style.setProperty("--accent", accentColor(color));
+  document.documentElement.style.setProperty("--memo-bg-image", backgroundImage ? `url("${backgroundImage.replace(/"/g, "%22")}")` : "none");
+  document.documentElement.style.setProperty("--memo-bg-opacity", String(imageOpacity));
+  document.documentElement.style.setProperty("--memo-panel-bg", rgbaString(color, panelColorAlpha));
 }
 
 function applyMemoTypography(memo) {
@@ -1118,7 +1284,10 @@ function renderHandles() {
   addButton.className = "add-handle-button";
   addButton.title = "새 메모";
   addButton.setAttribute("aria-label", "새 메모");
-  addButton.textContent = "+";
+  const addIcon = document.createElement("span");
+  addIcon.className = "add-handle-plus";
+  addIcon.textContent = "+";
+  addButton.appendChild(addIcon);
   addButton.addEventListener("click", addIndex);
   handleRail.appendChild(addButton);
 }
@@ -1131,18 +1300,68 @@ function memoPayload(memo) {
     fontSize: memo.fontSize,
     fontFamily: memo.fontFamily,
     lineSpacing: memo.lineSpacing,
+    backgroundImage: memo.backgroundImage || "",
+    backgroundSourceImage: memo.backgroundSourceImage || "",
+    backgroundCrop: normalizeBackgroundCrop(memo.backgroundCrop),
+    backgroundOpacity: normalizeOpacity(memo.backgroundOpacity),
     html: memo.html || ""
   };
 }
 
 async function nudgeShellPosition(delta) {
-  const result = await window.memoEdge.nudgeEdge(delta);
-  if (!result?.settings) return;
-  state.shell = normalizeShellSettings({ ...state.shell, ...result.settings });
-  syncShellLayoutClasses();
-  if (panelPositionInput) panelPositionInput.value = String(state.shell.edgeOffset);
-  if (anchorSelect) anchorSelect.value = state.shell.edgeAnchor;
-  saveState();
+  pendingNudgeDelta += delta;
+  if (nudgeFrame) return;
+
+  nudgeFrame = requestAnimationFrame(async () => {
+    nudgeFrame = null;
+    const nextDelta = pendingNudgeDelta;
+    pendingNudgeDelta = 0;
+    const result = await window.memoEdge.nudgeEdge(nextDelta);
+    if (!result?.settings) return;
+    state.shell = normalizeShellSettings({ ...state.shell, ...result.settings });
+    syncShellLayoutClasses();
+    if (panelPositionInput) panelPositionInput.value = String(state.shell.edgeOffset);
+    if (anchorSelect) anchorSelect.value = state.shell.edgeAnchor;
+    saveState();
+  });
+}
+
+function beginRailPositionDrag(event) {
+  if (event.button !== 0) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest("button, input, select, .handle-slot")) return;
+
+  const startAlong = isHorizontalDock() ? event.clientX : event.clientY;
+  railPositionDragState = {
+    pointerId: event.pointerId,
+    lastAlong: startAlong,
+    moved: false
+  };
+  handleRail.setPointerCapture?.(event.pointerId);
+  handleRail.classList.add("position-dragging");
+  event.preventDefault();
+}
+
+function moveRailPositionDrag(event) {
+  if (!railPositionDragState || event.buttons !== 1) return;
+  const currentAlong = isHorizontalDock() ? event.clientX : event.clientY;
+  const delta = currentAlong - railPositionDragState.lastAlong;
+  if (Math.abs(delta) < 2) return;
+  railPositionDragState.lastAlong = currentAlong;
+  railPositionDragState.moved = true;
+  nudgeShellPosition(delta);
+}
+
+function endRailPositionDrag(event) {
+  if (!railPositionDragState) return;
+  try {
+    handleRail.releasePointerCapture?.(railPositionDragState.pointerId ?? event.pointerId);
+  } catch {
+    // Pointer capture may already be gone if the window moved under the pointer.
+  }
+  railPositionDragState = null;
+  handleRail.classList.remove("position-dragging");
 }
 
 async function detachMemoToWindow(id) {
@@ -1181,6 +1400,11 @@ async function detachMemoToWindow(id) {
   saveState();
 }
 
+function popupActiveMemo() {
+  const memo = activeMemo();
+  if (memo) detachMemoToWindow(memo.id);
+}
+
 function applyDetachedMemoUpdate(payload) {
   const memo = state.indexes.find((item) => item.id === payload?.id);
   if (!memo) return;
@@ -1189,6 +1413,10 @@ function applyDetachedMemoUpdate(payload) {
   memo.fontSize = normalizeFontSize(payload.fontSize);
   memo.fontFamily = normalizeFontFamily(payload.fontFamily);
   memo.lineSpacing = normalizeLineSpacing(payload.lineSpacing);
+  memo.backgroundImage = normalizeAssetUrl(payload.backgroundImage);
+  memo.backgroundSourceImage = normalizeAssetUrl(payload.backgroundSourceImage || payload.backgroundImage);
+  memo.backgroundCrop = normalizeBackgroundCrop(payload.backgroundCrop);
+  memo.backgroundOpacity = normalizeOpacity(payload.backgroundOpacity);
   memo.html = typeof payload.html === "string" ? payload.html : memo.html;
   memo.updatedAt = Date.now();
 
@@ -1245,12 +1473,14 @@ function renderActiveMemo() {
   activeTitleInput.classList.add("hidden");
   activeTitleInput.value = memo.title || "메모";
   activeSubtitle.textContent = `${displayShortcut(state.shell.cycleShortcut || DEFAULT_CYCLE_SHORTCUT)}로 다음 플로팅 메모 열기`;
+  syncFooterOpacity(memo.backgroundOpacity);
   setTablePickerOpen(false);
   setTableToolsOpen(false);
   lastTableCell = null;
   editor.innerHTML = memo.html || "";
   prepareChecklistItems();
   resetEditorHistory();
+  updateToolbarCommandState();
   renderHandles();
   renderAllMemoList();
   renderIndexManager();
@@ -1320,11 +1550,19 @@ async function setExpanded(nextExpanded) {
 }
 
 function cycleFloatingMemo() {
+  if (!expanded) {
+    const memo = activeMemo();
+    if (!memo) return;
+    if (state.activeId !== memo.id) selectMemo(memo.id);
+    setExpanded(true);
+    return;
+  }
+
   const memos = floatingMemos();
   if (!memos.length) return;
 
   const currentIndex = memos.findIndex((memo) => memo.id === state.activeId);
-  const nextIndex = expanded && currentIndex >= 0 ? (currentIndex + 1) % memos.length : 0;
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % memos.length : 0;
   selectMemo(memos[nextIndex].id);
   setExpanded(true);
 }
@@ -1361,8 +1599,300 @@ function closeLaunchGuide() {
 function execCommand(command, value = null) {
   editor.focus();
   document.execCommand(command, false, value);
+  updateToolbarCommandState();
   persistEditor();
   pushEditorHistory();
+}
+
+function updateToolbarCommandState() {
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const inEditor = selectionBelongsToEditor(range);
+  document.querySelectorAll("[data-command]").forEach((button) => {
+    const command = button.dataset.command;
+    let active = false;
+    if (inEditor && command) {
+      try {
+        active = document.queryCommandState(command);
+      } catch {
+        active = false;
+      }
+    }
+    button.classList.toggle("active", active);
+  });
+  if (inEditor) syncToolbarSelectionValues(range);
+}
+
+function currentEditorRange() {
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  return selectionBelongsToEditor(range) ? range : null;
+}
+
+function restoreFormattingControlFocus(element) {
+  if (element instanceof HTMLElement && element !== editor && !editor.contains(element)) {
+    element.focus({ preventScroll: true });
+  }
+}
+
+function isEditableTextNode(node) {
+  if (!node || node.nodeType !== Node.TEXT_NODE || !node.nodeValue) return false;
+  const parent = node.parentElement;
+  if (!parent) return false;
+  return !parent.closest("[contenteditable='false'], .check-box");
+}
+
+function selectWrappedTextNodes(operations) {
+  const firstOperation = operations.find((operation) => operation.span);
+  const lastOperation = operations.findLast((operation) => operation.span);
+  if (!firstOperation?.span || !lastOperation?.span) return false;
+  const range = document.createRange();
+  range.setStartBefore(firstOperation.span);
+  range.setEndAfter(lastOperation.span);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+  return true;
+}
+
+function insertTypingStyleAnchor(range, property, value) {
+  const span = document.createElement("span");
+  span.className = "typing-style-anchor";
+  span.style[property] = value;
+  const textNode = document.createTextNode(CHECK_TEXT_PLACEHOLDER);
+  span.appendChild(textNode);
+  range.insertNode(span);
+
+  const nextRange = document.createRange();
+  nextRange.setStart(textNode, textNode.nodeValue.length);
+  nextRange.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+  savedEditorRange = nextRange.cloneRange();
+}
+
+function wrapTextNodeSegment(node, startOffset, endOffset, property, value) {
+  if (!node.parentNode || startOffset >= endOffset) return null;
+  let selected = node;
+  if (endOffset < selected.nodeValue.length) selected.splitText(endOffset);
+  if (startOffset > 0) selected = selected.splitText(startOffset);
+
+  const span = document.createElement("span");
+  span.style[property] = value;
+  selected.parentNode.insertBefore(span, selected);
+  span.appendChild(selected);
+  return span;
+}
+
+function wrapRangeTextNodes(range, property, value) {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  const operations = [];
+  let node = walker.nextNode();
+  while (node) {
+    if (isEditableTextNode(node)) {
+      let intersects = false;
+      try {
+        intersects = range.intersectsNode(node);
+      } catch {
+        intersects = false;
+      }
+      if (intersects) {
+        const startOffset = node === range.startContainer ? range.startOffset : 0;
+        const endOffset = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+        if (startOffset < endOffset) operations.push({ node, startOffset, endOffset });
+      }
+    }
+    node = walker.nextNode();
+  }
+
+  for (let index = operations.length - 1; index >= 0; index -= 1) {
+    const operation = operations[index];
+    operation.span = wrapTextNodeSegment(
+      operation.node,
+      operation.startOffset,
+      operation.endOffset,
+      property,
+      value
+    );
+  }
+
+  return selectWrappedTextNodes(operations);
+}
+
+function applyInlineTextStyle(property, value) {
+  const returnFocusElement = document.activeElement;
+  restoreEditorSelection();
+  const range = currentEditorRange();
+  if (!range) return;
+  if (range.collapsed) {
+    insertTypingStyleAnchor(range, property, value);
+  } else {
+    wrapRangeTextNodes(range.cloneRange(), property, value);
+  }
+  persistEditor();
+  pushEditorHistory();
+  updateToolbarCommandState();
+  restoreFormattingControlFocus(returnFocusElement);
+}
+
+function closestLineBlock(node) {
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  if (!element) return editor;
+  const block = element.closest("p, div, li, h1, h2, h3, h4, h5, h6, blockquote, td, th");
+  return block && editor.contains(block) ? block : editor;
+}
+
+function selectedLineBlocks(range) {
+  if (!range) return [];
+  if (range.collapsed) return [closestLineBlock(range.startContainer)];
+  const blocks = Array.from(
+    editor.querySelectorAll("p, div, li, h1, h2, h3, h4, h5, h6, blockquote, td, th")
+  ).filter((block) => {
+    if (block.closest("[contenteditable='false'], .check-box")) return false;
+    try {
+      return range.intersectsNode(block);
+    } catch {
+      return false;
+    }
+  });
+  if (!blocks.length) return [closestLineBlock(range.startContainer)];
+  return blocks.filter((block) => !blocks.some((other) => other !== block && block.contains(other)));
+}
+
+function applyLineSpacingToSelection(value) {
+  const lineHeight = String(normalizeLineSpacing(value));
+  const returnFocusElement = document.activeElement;
+  restoreEditorSelection();
+  const range = currentEditorRange();
+  if (!range) return;
+  selectedLineBlocks(range).forEach((block) => {
+    block.style.lineHeight = lineHeight;
+  });
+  persistEditor();
+  pushEditorHistory();
+  updateToolbarCommandState();
+  restoreFormattingControlFocus(returnFocusElement);
+}
+
+function firstFontFamilyName(value) {
+  return String(value || "")
+    .split(",")[0]
+    .trim()
+    .replace(/^["']|["']$/g, "");
+}
+
+function effectiveLineSpacing(element) {
+  const block = closestLineBlock(element);
+  const computed = window.getComputedStyle(block);
+  const lineHeight = block.style.lineHeight || computed.lineHeight;
+  if (/^\d+(\.\d+)?$/.test(lineHeight)) return normalizeLineSpacing(lineHeight);
+  if (lineHeight.endsWith("px")) {
+    const fontSize = Number.parseFloat(computed.fontSize) || DEFAULT_FONT_SIZE;
+    return normalizeLineSpacing(Number.parseFloat(lineHeight) / fontSize);
+  }
+  return DEFAULT_LINE_SPACING;
+}
+
+function syncToolbarSelectionValues(range = currentEditorRange()) {
+  if (!range) return;
+  const node = range.startContainer;
+  const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  if (!element || !editor.contains(element)) return;
+  const computed = window.getComputedStyle(element);
+
+  if (fontFamilyToolbarSelect && document.activeElement !== fontFamilyToolbarSelect) {
+    const family = normalizeFontFamily(firstFontFamilyName(computed.fontFamily));
+    if (!Array.from(fontFamilyToolbarSelect.options).some((option) => option.value === family)) {
+      populateFontFamilySelect(fontFamilyToolbarSelect, family);
+    } else {
+      fontFamilyToolbarSelect.value = family;
+      fontFamilyToolbarSelect.style.fontFamily = fontFamilyCss(family);
+    }
+  }
+  if (fontSizeToolbarSelect && document.activeElement !== fontSizeToolbarSelect) {
+    fontSizeToolbarSelect.value = String(normalizeFontSize(Number.parseFloat(computed.fontSize)));
+  }
+  if (lineSpacingToolbarSelect && document.activeElement !== lineSpacingToolbarSelect) {
+    lineSpacingToolbarSelect.value = String(effectiveLineSpacing(element));
+  }
+}
+
+function rememberTextColor(color) {
+  const nextColor = normalizeHexColor(color, "#283044");
+  state.prefs = normalizeAppPrefs({
+    ...state.prefs,
+    recentTextColors: [nextColor, ...(state.prefs?.recentTextColors || [])]
+  });
+  if (textColorInput) textColorInput.value = nextColor;
+  renderTextColorPalette();
+}
+
+function applyTextColor(color) {
+  const nextColor = normalizeHexColor(color, "#283044");
+  rememberTextColor(nextColor);
+  applyInlineTextStyle("color", nextColor);
+}
+
+function setTextColorPaletteOpen(open) {
+  if (!textColorPalette) return;
+  if (open) renderTextColorPalette();
+  textColorPalette.classList.toggle("hidden", !open);
+}
+
+function toggleTextColorPalette() {
+  setTextColorPaletteOpen(textColorPalette?.classList.contains("hidden"));
+}
+
+function renderTextColorPalette() {
+  if (!textColorPalette) return;
+  const recent = normalizeTextColorList(state.prefs?.recentTextColors);
+  const colors = [
+    ...TEXT_COLOR_PRESETS,
+    ...recent.filter((color) => !TEXT_COLOR_PRESETS.includes(color))
+  ];
+  textColorPalette.innerHTML = "";
+  colors.forEach((color) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "text-color-swatch";
+    button.style.setProperty("--swatch-color", color);
+    button.title = color;
+    button.setAttribute("aria-label", color);
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      rememberEditorSelection();
+    });
+    button.addEventListener("click", () => {
+      applyTextColor(color);
+      setTextColorPaletteOpen(false);
+    });
+    textColorPalette.appendChild(button);
+  });
+
+  const customLabel = document.createElement("label");
+  customLabel.className = "text-color-custom";
+  customLabel.title = "Custom color";
+  const customText = document.createElement("span");
+  customText.textContent = "A";
+  const customInput = document.createElement("input");
+  customInput.type = "color";
+  customInput.value = textColorInput?.value || recent[0] || "#283044";
+  customInput.addEventListener("mousedown", rememberEditorSelection);
+  customInput.addEventListener("input", () => applyTextColor(customInput.value));
+  customLabel.append(customText, customInput);
+  textColorPalette.appendChild(customLabel);
+}
+
+function toggleToolbarVisibility() {
+  state.prefs = normalizeAppPrefs({
+    ...state.prefs,
+    toolbarCollapsed: !state.prefs?.toolbarCollapsed
+  });
+  syncToolbarVisibility();
+  saveState();
 }
 
 function clearEditorPreservingUndo() {
@@ -1558,9 +2088,7 @@ function createMemoTable(rows, cols) {
   for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
     const row = document.createElement("tr");
     for (let colIndex = 0; colIndex < cols; colIndex += 1) {
-      const cell = document.createElement("td");
-      cell.appendChild(document.createElement("br"));
-      row.appendChild(cell);
+      row.appendChild(createTableCell());
     }
     tbody.appendChild(row);
   }
@@ -1571,6 +2099,7 @@ function createMemoTable(rows, cols) {
 
 function createTableCell() {
   const cell = document.createElement("td");
+  cell.style.backgroundColor = "#ffffff";
   cell.appendChild(document.createElement("br"));
   return cell;
 }
@@ -2245,7 +2774,7 @@ function displayLabel(display) {
 async function fillSettingsForm() {
   const shellState = await window.memoEdge.getShellState();
   state.shell = normalizeShellSettings({ ...state.shell, ...(shellState.settings || {}) });
-  state.shell.followCursorDisplay = shellState.settings?.followCursorDisplay !== false;
+  state.shell.followCursorDisplay = shellState.settings?.followCursorDisplay === true;
   syncShellLayoutClasses();
 
   displaySelect.innerHTML = "";
@@ -2254,14 +2783,17 @@ async function fillSettingsForm() {
   auto.textContent = "자동 (마우스가 있는 모니터)";
   displaySelect.appendChild(auto);
 
-  for (const display of shellState.displays || []) {
+  const displays = shellState.displays || [];
+  for (const display of displays) {
     const option = document.createElement("option");
     option.value = String(display.id);
     option.textContent = displayLabel(display);
     displaySelect.appendChild(option);
   }
 
-  displaySelect.value = state.shell.followCursorDisplay ? "auto" : String(state.shell.targetDisplayId);
+  const fixedDisplayId = state.shell.targetDisplayId ?? displays[0]?.id ?? shellState.activeDisplayId;
+  displaySelect.value = state.shell.followCursorDisplay ? "auto" : String(fixedDisplayId ?? "auto");
+  if (displaySelect.value === "") displaySelect.value = "auto";
   dockEdgeSelect.value = state.shell.dockEdge;
   visibilityModeSelect.value = state.shell.visibilityMode;
   anchorSelect.value = state.shell.edgeAnchor;
@@ -2274,6 +2806,8 @@ async function fillSettingsForm() {
   if (panelPositionInput) panelPositionInput.value = String(state.shell.edgeOffset);
   syncPanelSizeFields();
   applyCommonTypography();
+  populateFontFamilySelect(commonFontFamilySelect, state.prefs?.commonFontFamily || DEFAULT_FONT_FAMILY);
+  if (commonFontSizeSelect) commonFontSizeSelect.value = String(normalizeCommonFontSize(state.prefs?.commonFontSize));
   populateFontFamilySelect(defaultFontFamilySelect, state.memoDefaults.fontFamily);
   populateFontSizeSelect(defaultFontSizeSelect, state.memoDefaults.fontSize);
   populateLineSpacingSelect(defaultLineSpacingSelect, state.memoDefaults.lineSpacing);
@@ -2407,22 +2941,62 @@ function renderIndexManager() {
     fontFamilyLabel.textContent = "글씨체";
     const fontFamilySelect = document.createElement("select");
     populateFontFamilySelect(fontFamilySelect, memo.fontFamily);
-    fontFamilySelect.addEventListener("change", () => updateMemoTypography(memo.id, { fontFamily: fontFamilySelect.value }));
+    fontFamilySelect.addEventListener("change", () => {
+      fontFamilySelect.style.fontFamily = fontFamilyCss(fontFamilySelect.value);
+      updateMemoTypography(memo.id, { fontFamily: fontFamilySelect.value });
+    });
     fontFamilyLabel.appendChild(fontFamilySelect);
 
     const lineSpacingLabel = document.createElement("label");
     lineSpacingLabel.className = "compact-field";
     lineSpacingLabel.textContent = "줄간격";
-    const lineSpacingSelect = document.createElement("select");
-    populateLineSpacingSelect(lineSpacingSelect, memo.lineSpacing);
-    lineSpacingSelect.addEventListener("change", () =>
+    const lineSpacingSelect = document.createElement("input");
+    lineSpacingSelect.type = "number";
+    lineSpacingSelect.min = "0.8";
+    lineSpacingSelect.max = "4";
+    lineSpacingSelect.step = "0.05";
+    lineSpacingSelect.value = String(normalizeLineSpacing(memo.lineSpacing));
+    lineSpacingSelect.addEventListener("input", () =>
       updateMemoTypography(memo.id, { lineSpacing: lineSpacingSelect.value })
     );
     lineSpacingLabel.appendChild(lineSpacingSelect);
 
     typeRow.append(fontSizeLabel, fontFamilyLabel, lineSpacingLabel);
 
-    row.append(main, colorRow, typeRow);
+    const backgroundRow = document.createElement("div");
+    backgroundRow.className = "background-row";
+
+    const backgroundButton = document.createElement("button");
+    backgroundButton.type = "button";
+    backgroundButton.className = "small-button";
+    backgroundButton.textContent = "배경";
+    backgroundButton.title = "배경 이미지 선택";
+    backgroundButton.addEventListener("click", () => editBackgroundForMemo(memo.id));
+
+    const opacityLabel = document.createElement("label");
+    opacityLabel.className = "compact-field background-opacity-field";
+    opacityLabel.textContent = "투명도";
+    const opacityInput = document.createElement("input");
+    opacityInput.type = "range";
+    opacityInput.min = "0";
+    opacityInput.max = "1";
+    opacityInput.step = "0.05";
+    opacityInput.value = String(normalizeOpacity(memo.backgroundOpacity));
+    opacityInput.addEventListener("input", () => updateMemoBackground(memo.id, { backgroundOpacity: opacityInput.value }));
+    opacityLabel.appendChild(opacityInput);
+
+    const clearBackgroundButton = document.createElement("button");
+    clearBackgroundButton.type = "button";
+    clearBackgroundButton.className = "small-button";
+    clearBackgroundButton.textContent = "지움";
+    clearBackgroundButton.disabled = !memo.backgroundImage && !memo.backgroundSourceImage;
+    clearBackgroundButton.addEventListener("click", () =>
+      updateMemoBackground(memo.id, { backgroundImage: "", backgroundSourceImage: "", backgroundCrop: null })
+    );
+
+    backgroundRow.append(backgroundButton, opacityLabel, clearBackgroundButton);
+
+    row.append(main, colorRow, typeRow, backgroundRow);
     indexManagerList.appendChild(row);
   });
 }
@@ -2479,6 +3053,24 @@ function updateMemoColor(id, color) {
   scheduleSave();
 }
 
+function updateMemoBackground(id, partial) {
+  const memo = state.indexes.find((item) => item.id === id);
+  if (!memo) return;
+  if (partial.backgroundImage !== undefined) memo.backgroundImage = normalizeAssetUrl(partial.backgroundImage);
+  if (partial.backgroundSourceImage !== undefined) {
+    memo.backgroundSourceImage = normalizeAssetUrl(partial.backgroundSourceImage);
+  }
+  if (partial.backgroundCrop !== undefined) memo.backgroundCrop = normalizeBackgroundCrop(partial.backgroundCrop);
+  if (partial.backgroundOpacity !== undefined) memo.backgroundOpacity = normalizeOpacity(partial.backgroundOpacity);
+  memo.updatedAt = Date.now();
+  if (memo.id === state.activeId) {
+    applyMemoTheme(memo);
+    syncFooterOpacity(memo.backgroundOpacity);
+  }
+  if (appShell.classList.contains("settings-open")) renderIndexManager();
+  scheduleSave();
+}
+
 function updateMemoTypography(id, partial) {
   const memo = state.indexes.find((item) => item.id === id);
   if (!memo) return;
@@ -2494,6 +3086,284 @@ function updateMemoTypography(id, partial) {
   scheduleSave();
 }
 
+function cropperImageRect() {
+  if (!cropperStage || !cropperImage?.naturalWidth || !cropperImage?.naturalHeight) return null;
+  const rect = cropperStage.getBoundingClientRect();
+  const stageWidth = rect.width;
+  const stageHeight = rect.height;
+  if (!stageWidth || !stageHeight) return null;
+  const imageRatio = cropperImage.naturalWidth / cropperImage.naturalHeight;
+  const stageRatio = stageWidth / stageHeight;
+  if (imageRatio > stageRatio) {
+    const width = stageWidth;
+    const height = width / imageRatio;
+    return { left: 0, top: (stageHeight - height) / 2, width, height };
+  }
+  const height = stageHeight;
+  const width = height * imageRatio;
+  return { left: (stageWidth - width) / 2, top: 0, width, height };
+}
+
+function boxFromBackgroundCrop(crop, rect) {
+  const normalizedCrop = normalizeBackgroundCrop(crop) || { x: 0, y: 0, width: 1, height: 1 };
+  return {
+    left: rect.left + normalizedCrop.x * rect.width,
+    top: rect.top + normalizedCrop.y * rect.height,
+    width: normalizedCrop.width * rect.width,
+    height: normalizedCrop.height * rect.height
+  };
+}
+
+function clampCropBox(box) {
+  const rect = backgroundCropperState?.imageRect || cropperImageRect();
+  if (!rect) return box;
+  const minSize = Math.min(72, rect.width, rect.height);
+  const width = clamp(box.width, minSize, rect.width);
+  const height = clamp(box.height, minSize, rect.height);
+  const left = clamp(box.left, rect.left, rect.left + rect.width - width);
+  const top = clamp(box.top, rect.top, rect.top + rect.height - height);
+  return { left, top, width, height };
+}
+
+function renderCropBox() {
+  if (!cropperBox || !backgroundCropperState?.box) return;
+  const box = backgroundCropperState.box;
+  cropperBox.style.left = `${box.left}px`;
+  cropperBox.style.top = `${box.top}px`;
+  cropperBox.style.width = `${box.width}px`;
+  cropperBox.style.height = `${box.height}px`;
+}
+
+function cropperCurrentCrop() {
+  const rect = backgroundCropperState?.imageRect || cropperImageRect();
+  const box = backgroundCropperState?.box;
+  if (!rect || !box) return null;
+  return normalizeBackgroundCrop({
+    x: (box.left - rect.left) / rect.width,
+    y: (box.top - rect.top) / rect.height,
+    width: box.width / rect.width,
+    height: box.height / rect.height
+  });
+}
+
+function resetCropBox(forceFull = false) {
+  const rect = cropperImageRect();
+  if (!rect) return;
+  const crop = forceFull ? { x: 0, y: 0, width: 1, height: 1 } : backgroundCropperState?.initialCrop;
+  backgroundCropperState.imageRect = rect;
+  backgroundCropperState.box = clampCropBox(boxFromBackgroundCrop(crop, rect));
+  renderCropBox();
+}
+
+function openBackgroundCropper(sourceUrl, memoId, crop = null) {
+  if (!sourceUrl || !memoId || !backgroundCropper || !cropperImage) return;
+  backgroundCropperState = {
+    memoId,
+    sourceUrl,
+    initialCrop: normalizeBackgroundCrop(crop),
+    imageRect: null,
+    box: null,
+    drag: null
+  };
+  cropperApplyButton.disabled = false;
+  cropperImage.onload = () => requestAnimationFrame(() => resetCropBox());
+  cropperImage.onerror = () => {
+    setSettingsStatus("Background image could not be opened.", 0);
+    cropperApplyButton.disabled = false;
+  };
+  cropperImage.removeAttribute("src");
+  backgroundCropper.classList.remove("hidden");
+  cropperImage.src = sourceUrl;
+}
+
+function closeBackgroundCropper() {
+  if (backgroundCropperState?.objectUrl) URL.revokeObjectURL(backgroundCropperState.objectUrl);
+  backgroundCropperState = null;
+  if (backgroundCropper) backgroundCropper.classList.add("hidden");
+  if (cropperImage) cropperImage.removeAttribute("src");
+}
+
+function handleCropperWindowResize() {
+  if (!backgroundCropperState) return;
+  backgroundCropperState.initialCrop = cropperCurrentCrop() || backgroundCropperState.initialCrop;
+  requestAnimationFrame(() => resetCropBox());
+}
+
+function resizeCropBox(handle, startBox, deltaX, deltaY) {
+  let { left, top, width, height } = startBox;
+  if (handle.includes("w")) {
+    left += deltaX;
+    width -= deltaX;
+  }
+  if (handle.includes("e")) width += deltaX;
+  if (handle.includes("n")) {
+    top += deltaY;
+    height -= deltaY;
+  }
+  if (handle.includes("s")) height += deltaY;
+  return { left, top, width, height };
+}
+
+function beginCropDrag(event) {
+  if (!backgroundCropperState?.box) return;
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest("#cropperBox")) return;
+  const handle = target instanceof Element ? target.dataset.cropHandle || "move" : "move";
+  backgroundCropperState.drag = {
+    handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    startBox: { ...backgroundCropperState.box }
+  };
+  cropperStage?.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function moveCropDrag(event) {
+  if (!backgroundCropperState?.drag) return;
+  const drag = backgroundCropperState.drag;
+  const deltaX = event.clientX - drag.startX;
+  const deltaY = event.clientY - drag.startY;
+  const nextBox =
+    drag.handle === "move"
+      ? {
+          ...drag.startBox,
+          left: drag.startBox.left + deltaX,
+          top: drag.startBox.top + deltaY
+        }
+      : resizeCropBox(drag.handle, drag.startBox, deltaX, deltaY);
+  backgroundCropperState.box = clampCropBox(nextBox);
+  renderCropBox();
+}
+
+function endCropDrag(event) {
+  if (!backgroundCropperState?.drag) return;
+  backgroundCropperState.drag = null;
+  try {
+    cropperStage?.releasePointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture can disappear when the cropper is closed mid-drag.
+  }
+}
+
+function croppedBackgroundDataUrl() {
+  const crop = cropperCurrentCrop();
+  if (!crop || !cropperImage?.naturalWidth || !cropperImage?.naturalHeight) return "";
+  const naturalWidth = cropperImage.naturalWidth;
+  const naturalHeight = cropperImage.naturalHeight;
+  const sourceX = clamp(Math.round(crop.x * naturalWidth), 0, naturalWidth - 1);
+  const sourceY = clamp(Math.round(crop.y * naturalHeight), 0, naturalHeight - 1);
+  const sourceWidth = clamp(Math.round(crop.width * naturalWidth), 1, naturalWidth - sourceX);
+  const sourceHeight = clamp(Math.round(crop.height * naturalHeight), 1, naturalHeight - sourceY);
+  const scale = Math.min(1, 1800 / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const context = canvas.getContext("2d");
+  context.drawImage(cropperImage, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+async function applyBackgroundCrop() {
+  if (!backgroundCropperState) return;
+  cropperApplyButton.disabled = true;
+  const memoId = backgroundCropperState.memoId;
+  const sourceUrl = backgroundCropperState.sourceUrl;
+  const crop = cropperCurrentCrop();
+  const dataUrl = croppedBackgroundDataUrl();
+  const result = await window.memoEdge.saveBackgroundImage?.(dataUrl);
+  if (!result?.ok || !result?.url) {
+    setSettingsStatus(`배경 저장 실패: ${result?.message || "이미지 없음"}`, 0);
+    cropperApplyButton.disabled = false;
+    return;
+  }
+  const memo = state.indexes.find((item) => item.id === memoId);
+  updateMemoBackground(memoId, {
+    backgroundImage: result.url,
+    backgroundSourceImage: sourceUrl,
+    backgroundCrop: crop,
+    backgroundOpacity: normalizeOpacity(memo?.backgroundOpacity)
+  });
+  closeBackgroundCropper();
+}
+
+function imageFileFromPaste(event) {
+  const items = Array.from(event.clipboardData?.items || []);
+  const item = items.find((entry) => entry.kind === "file" && entry.type.startsWith("image/"));
+  if (item) return item.getAsFile();
+  return Array.from(event.clipboardData?.files || []).find((file) => file.type.startsWith("image/")) || null;
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("FILE_READ_FAILED"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveBackgroundFile(file) {
+  const dataUrl = await fileToDataUrl(file);
+  const result = await window.memoEdge.saveBackgroundImage?.(dataUrl);
+  if (!result?.ok || !result?.url) throw new Error(result?.message || "BACKGROUND_SAVE_FAILED");
+  return result.url;
+}
+
+async function handleBackgroundPaste(event) {
+  const file = imageFileFromPaste(event);
+  const memo = activeMemo();
+  if (!file || !memo) return;
+  event.preventDefault();
+  try {
+    const sourceUrl = await saveBackgroundFile(file);
+    openBackgroundCropper(sourceUrl, memo.id, null);
+  } catch (error) {
+    setSettingsStatus(`Background paste failed: ${error.message || error}`, 0);
+  }
+}
+
+async function importFontForApp() {
+  const result = await window.memoEdge.importFontFile?.();
+  if (result?.canceled) return;
+  if (!result?.ok) {
+    setSettingsStatus(`글씨체 추가 실패: ${result?.message || "알 수 없음"}`, 0);
+    return;
+  }
+  registerCustomFonts(result.fonts || (result.font ? [...customFonts, result.font] : customFonts));
+  const nextFamily = result.font?.family;
+  if (nextFamily) {
+    state.memoDefaults = normalizeMemoDefaults({ ...state.memoDefaults, fontFamily: nextFamily });
+    populateFontFamilySelect(commonFontFamilySelect, state.prefs?.commonFontFamily || DEFAULT_FONT_FAMILY);
+    populateFontFamilySelect(defaultFontFamilySelect, nextFamily);
+    syncToolbarTypography();
+    renderIndexManager();
+    saveState();
+  }
+  setSettingsStatus("글씨체 추가됨");
+}
+
+async function importBackgroundForMemo(id) {
+  const result = await window.memoEdge.importBackgroundImage?.();
+  if (result?.canceled) return;
+  if (!result?.ok) {
+    setSettingsStatus(`배경 추가 실패: ${result?.message || "알 수 없음"}`, 0);
+    return;
+  }
+  openBackgroundCropper(result.url, id, null);
+}
+
+async function editBackgroundForMemo(id) {
+  const memo = state.indexes.find((item) => item.id === id);
+  if (!memo) return;
+  const sourceUrl = normalizeAssetUrl(memo.backgroundSourceImage || memo.backgroundImage);
+  if (sourceUrl) {
+    openBackgroundCropper(sourceUrl, id, memo.backgroundCrop);
+    return;
+  }
+  await importBackgroundForMemo(id);
+}
+
 function deleteIndex(id) {
   detachedMemoPlacements.delete(id);
   if (state.indexes.length <= 1) {
@@ -2504,6 +3374,10 @@ function deleteIndex(id) {
     memo.fontSize = normalizeFontSize(state.memoDefaults?.fontSize);
     memo.fontFamily = normalizeFontFamily(state.memoDefaults?.fontFamily);
     memo.lineSpacing = normalizeLineSpacing(state.memoDefaults?.lineSpacing);
+    memo.backgroundImage = "";
+    memo.backgroundSourceImage = "";
+    memo.backgroundCrop = null;
+    memo.backgroundOpacity = 0;
     state.activeId = memo.id;
     state.floatingIds = [memo.id];
     renderActiveMemo();
@@ -2525,7 +3399,7 @@ function deleteIndex(id) {
 }
 
 async function applySettings() {
-  const selectedDisplay = displaySelect.value;
+  const selectedDisplay = displaySelect.value || "auto";
   const cycleShortcut = cycleShortcutInput.value.trim() || DEFAULT_CYCLE_SHORTCUT;
   const hideShortcut = hideShortcutInput.value.trim() || DEFAULT_HIDE_SHORTCUT;
   state.memoDefaults = normalizeMemoDefaults({
@@ -2535,6 +3409,8 @@ async function applySettings() {
   });
   state.prefs = normalizeAppPrefs({
     ...state.prefs,
+    commonFontFamily: commonFontFamilySelect?.value || DEFAULT_FONT_FAMILY,
+    commonFontSize: commonFontSizeSelect?.value || DEFAULT_COMMON_FONT_SIZE,
     showLaunchGuideOnStartup: startupGuideInput.checked,
     startupDefaultApplied: true,
     startupUserChoiceSet: false
@@ -2607,6 +3483,8 @@ async function resetSettingsOnly() {
   state.memoDefaults = normalizeMemoDefaults(defaultMemoDefaults);
   state.prefs = normalizeAppPrefs({
     ...defaultAppPrefs,
+    commonFontFamily: DEFAULT_FONT_FAMILY,
+    commonFontSize: DEFAULT_COMMON_FONT_SIZE,
     startupDefaultApplied: true,
     startupUserChoiceSet: false,
     initialSingleMemoApplied: true,
@@ -2625,23 +3503,34 @@ document.querySelectorAll("[data-command]").forEach((button) => {
   button.addEventListener("click", () => execCommand(button.dataset.command));
 });
 
+document.querySelectorAll(".tool-button").forEach((button) => {
+  button.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    rememberEditorSelection();
+  });
+});
+
 editor.addEventListener("input", () => {
   persistEditor();
   pushEditorHistory();
   rememberEditorSelection();
+  updateToolbarCommandState();
   updateTableTools();
 });
 editor.addEventListener("keydown", handleEditorKeydown);
 editor.addEventListener("keyup", () => {
   rememberEditorSelection();
+  updateToolbarCommandState();
   updateTableTools();
 });
 editor.addEventListener("mouseup", () => {
   rememberEditorSelection();
+  updateToolbarCommandState();
   updateTableTools();
 });
 editor.addEventListener("focus", () => {
   rememberEditorSelection();
+  updateToolbarCommandState();
   updateTableTools();
 });
 editor.addEventListener("click", (event) => {
@@ -2652,13 +3541,29 @@ editor.addEventListener("click", (event) => {
   updateTableTools();
 });
 document.addEventListener("selectionchange", () => {
-  if (document.activeElement === editor || editor.contains(document.activeElement)) updateTableTools();
+  updateToolbarCommandState();
+  if (document.activeElement === editor || editor.contains(document.activeElement)) {
+    updateTableTools();
+  }
 });
+handleRail?.addEventListener("pointerdown", beginRailPositionDrag);
+document.addEventListener("pointermove", moveRailPositionDrag);
+document.addEventListener("pointerup", endRailPositionDrag);
+document.addEventListener("pointercancel", endRailPositionDrag);
 document.addEventListener("pointerup", endHandleDrag);
 document.addEventListener("pointercancel", endHandleDrag);
 document.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  const textColorField = textColorInput?.closest(".toolbar-color-field");
+  if (
+    textColorPalette &&
+    !textColorPalette.classList.contains("hidden") &&
+    !textColorPalette.contains(target) &&
+    !textColorField?.contains(target)
+  ) {
+    setTextColorPaletteOpen(false);
+  }
   if (
     editor.contains(target) ||
     tableTools?.contains(target) ||
@@ -2671,6 +3576,7 @@ document.addEventListener("pointerdown", (event) => {
   setTableToolsOpen(false);
 });
 collapseButton.addEventListener("click", () => setExpanded(false));
+toolbarToggleButton?.addEventListener("click", toggleToolbarVisibility);
 settingsButton.addEventListener("click", openSettings);
 deleteActiveMemoButton?.addEventListener("click", () => {
   const memo = activeMemo();
@@ -2678,16 +3584,43 @@ deleteActiveMemoButton?.addEventListener("click", () => {
 });
 closeSettingsButton.addEventListener("click", closeSettings);
 allMemosButton.addEventListener("click", () => setMemoListOpen(memoListPanel.classList.contains("hidden")));
+activePopupButton?.addEventListener("click", popupActiveMemo);
 closeMemoListButton.addEventListener("click", () => setMemoListOpen(false));
 addIndexButton.addEventListener("click", addIndex);
 addSettingsIndexButton.addEventListener("click", addIndex);
+importFontButton?.addEventListener("click", importFontForApp);
+[commonFontFamilySelect, defaultFontFamilySelect].forEach((select) => {
+  select?.addEventListener("change", () => {
+    select.style.fontFamily = fontFamilyCss(select.value);
+  });
+});
+backgroundButton?.addEventListener("click", () => {
+  const memo = activeMemo();
+  if (memo) editBackgroundForMemo(memo.id);
+});
+footerOpacityInput?.addEventListener("input", () => {
+  const memo = activeMemo();
+  if (memo) updateMemoBackground(memo.id, { backgroundOpacity: footerOpacityInput.value });
+});
+cropperStage?.addEventListener("pointerdown", beginCropDrag);
+cropperStage?.addEventListener("pointermove", moveCropDrag);
+cropperStage?.addEventListener("pointerup", endCropDrag);
+cropperStage?.addEventListener("pointercancel", endCropDrag);
+cropperCancelButton?.addEventListener("click", closeBackgroundCropper);
+cropperResetButton?.addEventListener("click", () => {
+  if (backgroundCropperState) backgroundCropperState.initialCrop = { x: 0, y: 0, width: 1, height: 1 };
+  resetCropBox(true);
+});
+cropperApplyButton?.addEventListener("click", applyBackgroundCrop);
+document.addEventListener("paste", handleBackgroundPaste);
+window.addEventListener("resize", handleCropperWindowResize);
 lengthSelect.addEventListener("change", syncPanelSizeFields);
 anchorSelect.addEventListener("change", syncPanelSizeFields);
 panelPositionInput?.addEventListener("input", () => {
   anchorSelect.value = "custom";
   syncPanelSizeFields();
 });
-[panelResizeGrip, panelResizeWidthGrip, panelResizeCornerGrip].filter(Boolean).forEach((grip) => {
+document.querySelectorAll("[data-resize-axis]").forEach((grip) => {
   grip.addEventListener("pointerdown", beginPanelResize);
 });
 activeTitleButton.addEventListener("click", beginTitleEdit);
@@ -2747,20 +3680,28 @@ tableCellColorInput?.addEventListener("input", applyTableCellColor);
 tableFillColorInput?.addEventListener("input", applyTableFillColor);
 clearTableCellColorButton?.addEventListener("click", clearTableCellColor);
 deleteTableButton?.addEventListener("click", deleteTable);
+textColorInput?.closest(".toolbar-color-field")?.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+  rememberEditorSelection();
+});
+textColorInput?.closest(".toolbar-color-field")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleTextColorPalette();
+});
+textColorInput?.addEventListener("click", (event) => event.preventDefault());
+textColorInput?.addEventListener("input", () => applyTextColor(textColorInput.value));
+fontFamilyToolbarSelect?.addEventListener("mousedown", rememberEditorSelection);
+fontSizeToolbarSelect?.addEventListener("mousedown", rememberEditorSelection);
+lineSpacingToolbarSelect?.addEventListener("mousedown", rememberEditorSelection);
 fontSizeToolbarSelect.addEventListener("change", () => {
-  const memo = activeMemo();
-  if (!memo) return;
-  updateMemoTypography(memo.id, { fontSize: fontSizeToolbarSelect.value });
+  applyInlineTextStyle("fontSize", `${normalizeFontSize(fontSizeToolbarSelect.value)}px`);
 });
 fontFamilyToolbarSelect.addEventListener("change", () => {
-  const memo = activeMemo();
-  if (!memo) return;
-  updateMemoTypography(memo.id, { fontFamily: fontFamilyToolbarSelect.value });
+  fontFamilyToolbarSelect.style.fontFamily = fontFamilyCss(fontFamilyToolbarSelect.value);
+  applyInlineTextStyle("fontFamily", fontFamilyCss(fontFamilyToolbarSelect.value));
 });
 lineSpacingToolbarSelect.addEventListener("change", () => {
-  const memo = activeMemo();
-  if (!memo) return;
-  updateMemoTypography(memo.id, { lineSpacing: lineSpacingToolbarSelect.value });
+  applyLineSpacingToSelection(lineSpacingToolbarSelect.value);
 });
 clearButton.addEventListener("click", clearEditorPreservingUndo);
 applySettingsButton.addEventListener("click", applySettings);
@@ -2804,8 +3745,10 @@ async function initialize() {
         )
       ];
     }
+    registerCustomFonts(payload?.customFonts || []);
   } catch {
     systemFonts = [DEFAULT_FONT_FAMILY, "GulimChe", "Malgun Gothic", "Arial", "Calibri", "Consolas"];
+    registerCustomFonts([]);
   }
   const shellState = await window.memoEdge.getShellState();
   state.shell = normalizeShellSettings({ ...state.shell, ...(shellState.settings || {}) });
@@ -2824,9 +3767,6 @@ async function initialize() {
   appShell.classList.toggle("expanded", expanded);
   renderActiveMemo();
   saveState();
-  setTimeout(() => {
-    showLaunchGuide();
-  }, 350);
 }
 
 initialize();

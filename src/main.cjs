@@ -3,6 +3,7 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { pathToFileURL } = require("url");
 
 const COLLAPSED_WIDTH = 36;
 const PANEL_WIDTH = 480;
@@ -26,7 +27,7 @@ const DEFAULT_SETTINGS = {
   hideShortcut: "CommandOrControl+Shift+F",
   anchor: "middle",
   manualYOffset: 0,
-  followCursorDisplay: true,
+  followCursorDisplay: false,
   targetDisplayId: null
 };
 
@@ -59,6 +60,7 @@ let registeredHideShortcut = null;
 let followDisplayTimer = null;
 let isQuitting = false;
 let settingsOpen = false;
+let settingsSaveTimer = null;
 const detachedWindows = new Map();
 const detachedMemos = new Map();
 
@@ -81,8 +83,17 @@ function loadSettings() {
 }
 
 function saveSettings() {
+  if (settingsSaveTimer) {
+    clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = null;
+  }
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
   fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2), "utf8");
+}
+
+function scheduleSettingsSave() {
+  if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(saveSettings, 220);
 }
 
 function normalizeSettings(partial = {}) {
@@ -116,8 +127,10 @@ function normalizeSettings(partial = {}) {
       : DEFAULT_SETTINGS.visibilityMode,
     edgeAnchor,
     edgeOffset,
-    lengthMode: ["short", "normal", "long", "custom"].includes(merged.lengthMode)
+    lengthMode: ["normal", "long", "custom"].includes(merged.lengthMode)
       ? merged.lengthMode
+      : merged.lengthMode === "short"
+        ? "normal"
       : DEFAULT_SETTINGS.lengthMode,
     panelWidth:
       typeof merged.panelWidth === "number" && Number.isFinite(merged.panelWidth)
@@ -138,10 +151,18 @@ function normalizeSettings(partial = {}) {
     anchor: anchorAlias,
     manualYOffset:
       edgeOffset,
-    followCursorDisplay: Boolean(merged.followCursorDisplay),
+    followCursorDisplay: merged.followCursorDisplay === true,
     targetDisplayId:
       typeof merged.targetDisplayId === "number" ? merged.targetDisplayId : null
   };
+}
+
+function ensureDefaultDisplayTarget() {
+  if (settings.followCursorDisplay || settings.targetDisplayId !== null) return;
+  const firstDisplay = screen.getAllDisplays()[0] || screen.getPrimaryDisplay();
+  if (!firstDisplay) return;
+  settings = normalizeSettings({ targetDisplayId: firstDisplay.id, followCursorDisplay: false });
+  saveSettings();
 }
 
 function resolveIconPath() {
@@ -177,6 +198,100 @@ function sanitizeFontName(name) {
 
   if (!clean || /[\uFFFD?]/.test(clean)) return "";
   return clean;
+}
+
+function userDataAssetDir(kind) {
+  const dir = path.join(app.getPath("userData"), kind);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function fontManifestPath() {
+  return path.join(userDataAssetDir("fonts"), "fonts.json");
+}
+
+function safeFileName(value, fallback) {
+  const clean = String(value || fallback || "asset")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean || fallback || "asset";
+}
+
+function loadCustomFonts() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(fontManifestPath(), "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((font) => font && typeof font.family === "string" && typeof font.path === "string")
+      .filter((font) => font.family.trim() && fs.existsSync(font.path))
+      .map((font) => ({
+        family: sanitizeFontName(font.family) || path.basename(font.path, path.extname(font.path)),
+        path: font.path,
+        url: pathToFileURL(font.path).href
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomFonts(fonts) {
+  const serializable = fonts.map((font) => ({ family: font.family, path: font.path }));
+  fs.writeFileSync(fontManifestPath(), JSON.stringify(serializable, null, 2), "utf8");
+}
+
+async function importFontFile() {
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: "글씨체 파일 추가",
+    properties: ["openFile"],
+    filters: [{ name: "Font Files", extensions: ["ttf", "otf", "woff", "woff2"] }]
+  });
+
+  if (result.canceled || !result.filePaths?.[0]) return { ok: false, canceled: true };
+
+  const source = result.filePaths[0];
+  const ext = path.extname(source).toLowerCase();
+  const family = sanitizeFontName(path.basename(source, ext)) || "Custom Font";
+  const fileName = `${Date.now()}-${safeFileName(path.basename(source), "font")}`;
+  const target = path.join(userDataAssetDir("fonts"), fileName);
+  fs.copyFileSync(source, target);
+
+  const fonts = loadCustomFonts().filter((font) => font.family !== family || font.path !== target);
+  const font = { family, path: target, url: pathToFileURL(target).href };
+  fonts.push(font);
+  saveCustomFonts(fonts);
+  return { ok: true, font, fonts };
+}
+
+async function importBackgroundImage() {
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: "배경 이미지 선택",
+    properties: ["openFile"],
+    filters: [{ name: "Image Files", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }]
+  });
+
+  if (result.canceled || !result.filePaths?.[0]) return { ok: false, canceled: true };
+
+  const source = result.filePaths[0];
+  const fileName = `${Date.now()}-${safeFileName(path.basename(source), "background")}`;
+  const target = path.join(userDataAssetDir("backgrounds"), fileName);
+  fs.copyFileSync(source, target);
+  return { ok: true, path: target, url: pathToFileURL(target).href };
+}
+
+function saveCroppedBackgroundImage(dataUrl) {
+  if (typeof dataUrl !== "string") return { ok: false, message: "INVALID_IMAGE" };
+  const match = dataUrl.match(/^data:image\/(png|jpe?g|webp|gif|bmp);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) return { ok: false, message: "INVALID_IMAGE" };
+
+  const ext = match[1].toLowerCase().replace("jpeg", "jpg");
+  const buffer = Buffer.from(match[2].replace(/\s/g, ""), "base64");
+  if (!buffer.length) return { ok: false, message: "EMPTY_IMAGE" };
+
+  const fileName = `${Date.now()}-cropped-background.${ext}`;
+  const target = path.join(userDataAssetDir("backgrounds"), fileName);
+  fs.writeFileSync(target, buffer);
+  return { ok: true, path: target, url: pathToFileURL(target).href };
 }
 
 function listSystemFonts() {
@@ -248,7 +363,7 @@ function isHorizontalEdge(edge = settings.dockEdge) {
 }
 
 function preferredPanelHeight(display) {
-  const ratioByMode = { short: 1 / 3, normal: 1 / 2, long: 1 };
+  const ratioByMode = { normal: 1 / 2, long: 1 };
   const preferredHeight = settingsOpen
     ? SETTINGS_HEIGHT
     : settings.lengthMode === "custom"
@@ -395,6 +510,23 @@ function sendRendererCommand(channel) {
   mainWindow.webContents.send(channel);
 }
 
+function normalizeBackgroundCrop(value) {
+  if (!value || typeof value !== "object") return null;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  const width = Number(value.width);
+  const height = Number(value.height);
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  const normalizedX = clamp(x, 0, 0.99);
+  const normalizedY = clamp(y, 0, 0.99);
+  return {
+    x: normalizedX,
+    y: normalizedY,
+    width: clamp(width, 0.01, 1 - normalizedX),
+    height: clamp(height, 0.01, 1 - normalizedY)
+  };
+}
+
 function normalizeDetachedMemo(memo = {}) {
   return {
     id: typeof memo.id === "string" && memo.id ? memo.id : `memo-${Date.now()}`,
@@ -403,6 +535,20 @@ function normalizeDetachedMemo(memo = {}) {
     fontSize: typeof memo.fontSize === "number" ? memo.fontSize : Number(memo.fontSize) || 15,
     fontFamily: typeof memo.fontFamily === "string" && memo.fontFamily.trim() ? memo.fontFamily : "Gulim",
     lineSpacing: typeof memo.lineSpacing === "number" ? memo.lineSpacing : Number(memo.lineSpacing) || 1.5,
+    backgroundImage: typeof memo.backgroundImage === "string" ? memo.backgroundImage : "",
+    backgroundSourceImage:
+      typeof memo.backgroundSourceImage === "string" && memo.backgroundSourceImage
+        ? memo.backgroundSourceImage
+        : typeof memo.backgroundImage === "string"
+          ? memo.backgroundImage
+          : "",
+    backgroundCrop: normalizeBackgroundCrop(memo.backgroundCrop),
+    backgroundOpacity:
+      typeof memo.backgroundOpacity === "number" && Number.isFinite(memo.backgroundOpacity)
+        ? clamp(memo.backgroundOpacity, 0, 1)
+        : Number.isFinite(Number(memo.backgroundOpacity))
+          ? clamp(Number(memo.backgroundOpacity), 0, 1)
+          : 0,
     html: typeof memo.html === "string" ? memo.html : ""
   };
 }
@@ -599,6 +745,7 @@ if (!gotSingleInstanceLock) {
     if (process.platform === "win32") app.setAppUserModelId("com.youk.memobom");
 
     loadSettings();
+    ensureDefaultDisplayTarget();
     registerShortcuts();
     createMainWindow();
     createTray();
@@ -648,7 +795,7 @@ ipcMain.handle("shell:set-panel-height", (_, nextHeight) => {
     lengthMode: "custom",
     panelHeight: typeof nextHeight === "number" ? nextHeight : Number(nextHeight)
   });
-  saveSettings();
+  scheduleSettingsSave();
   refreshWindowBounds(false);
   refreshTrayMenu();
   return { ok: true, settings };
@@ -660,7 +807,7 @@ ipcMain.handle("shell:set-panel-size", (_, nextSize = {}) => {
     panelWidth: typeof nextSize.width === "number" ? nextSize.width : Number(nextSize.width),
     panelHeight: typeof nextSize.height === "number" ? nextSize.height : Number(nextSize.height)
   });
-  saveSettings();
+  scheduleSettingsSave();
   refreshWindowBounds(false);
   refreshTrayMenu();
   return { ok: true, settings };
@@ -674,7 +821,7 @@ ipcMain.handle("shell:nudge-edge", (_, delta) => {
     edgeAnchor: "custom",
     edgeOffset: clamp(settings.edgeOffset + Math.round(delta), -2500, 2500)
   });
-  saveSettings();
+  scheduleSettingsSave();
   refreshWindowBounds(false);
   return { ok: true, settings };
 });
@@ -687,7 +834,7 @@ ipcMain.handle("shell:nudge-y", (_, deltaY) => {
     edgeAnchor: "custom",
     edgeOffset: clamp(settings.edgeOffset + Math.round(deltaY), -2500, 2500)
   });
-  saveSettings();
+  scheduleSettingsSave();
   refreshWindowBounds(false);
   return { ok: true, settings };
 });
@@ -725,8 +872,33 @@ ipcMain.handle("display:list", () => ({
 
 ipcMain.handle("fonts:list", async () => ({
   ok: true,
-  fonts: await listSystemFonts()
+  fonts: await listSystemFonts(),
+  customFonts: loadCustomFonts()
 }));
+
+ipcMain.handle("fonts:import", async () => {
+  try {
+    return await importFontFile();
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("background:import", async () => {
+  try {
+    return await importBackgroundImage();
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("background:save-cropped", (_, dataUrl) => {
+  try {
+    return saveCroppedBackgroundImage(dataUrl);
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
 
 ipcMain.handle("user:get-name", () => {
   const candidates = [
@@ -809,6 +981,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  saveSettings();
   isQuitting = true;
 });
 

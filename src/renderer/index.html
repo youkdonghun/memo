@@ -18,9 +18,11 @@
             </button>
             <input id="activeTitleInput" class="active-title-input hidden" type="text" maxlength="80" />
             <button id="allMemosButton" class="memo-list-button" type="button">전체 메모</button>
+            <button id="activePopupButton" class="memo-list-button" type="button">팝업</button>
             <p id="activeSubtitle" class="active-subtitle"></p>
           </div>
           <div class="header-actions">
+            <button id="toolbarToggleButton" class="icon-button" type="button" title="서식 도구">Aa</button>
             <button id="deleteActiveMemoButton" class="icon-button danger" type="button" title="현재 메모 삭제">×</button>
             <button id="settingsButton" class="icon-button" type="button" title="설정">⚙</button>
             <button id="collapseButton" class="icon-button" type="button" title="접기">›</button>
@@ -30,8 +32,8 @@
         <div class="toolbar" aria-label="서식 도구">
           <div class="toolbar-row primary">
             <select id="fontFamilyToolbarSelect" class="toolbar-select" title="글씨체 변경" aria-label="글씨체 변경"></select>
-            <select id="fontSizeToolbarSelect" class="toolbar-size-select" title="글씨 크기" aria-label="글씨 크기"></select>
-            <select id="lineSpacingToolbarSelect" class="toolbar-line-select" title="줄간격" aria-label="줄간격"></select>
+            <input id="fontSizeToolbarSelect" class="toolbar-size-select" type="number" min="8" max="96" step="1" title="글씨 크기" aria-label="글씨 크기" />
+            <input id="lineSpacingToolbarSelect" class="toolbar-line-select" type="number" min="0.8" max="4" step="0.05" title="줄간격" aria-label="줄간격" />
           </div>
           <div class="toolbar-row secondary">
             <button id="undoButton" class="tool-button" type="button" title="되돌리기">↶</button>
@@ -42,9 +44,26 @@
             <button id="bulletButton" class="tool-button" type="button" title="목록">•</button>
             <button id="checkButton" class="tool-button" type="button" title="체크">☐</button>
             <button id="tableButton" class="tool-button" type="button" title="표 삽입">표</button>
+            <label class="toolbar-color-field" title="글씨 색">
+              <span>A</span>
+              <input id="textColorInput" type="color" value="#283044" aria-label="글씨 색" />
+            </label>
+            <button id="backgroundButton" class="tool-button" type="button" title="배경 변경">▧</button>
             <button id="clearButton" class="tool-button danger" type="button" title="전체 삭제">⌫</button>
           </div>
         </div>
+
+        <div id="textColorPalette" class="text-color-palette hidden" aria-label="Text color palette"></div>
+
+        <div id="memoListPanel" class="memo-list-panel hidden" aria-label="전체 메모 목록">
+          <div class="memo-list-panel-header">
+            <strong>전체 메모</strong>
+            <button id="closeMemoListButton" class="memo-list-close" type="button" title="닫기">×</button>
+          </div>
+          <div id="allMemoList" class="all-memo-list"></div>
+        </div>
+
+        <div id="editor" class="memo-editor" contenteditable="true" spellcheck="false"></div>
 
         <div id="tablePicker" class="table-picker hidden" aria-label="표 삽입">
           <label>
@@ -88,24 +107,28 @@
           <button id="deleteTableButton" class="small-button danger" type="button">표 삭제</button>
         </div>
 
-        <div id="memoListPanel" class="memo-list-panel hidden" aria-label="전체 메모 목록">
-          <div class="memo-list-panel-header">
-            <strong>전체 메모</strong>
-            <button id="closeMemoListButton" class="memo-list-close" type="button" title="닫기">×</button>
-          </div>
-          <div id="allMemoList" class="all-memo-list"></div>
-        </div>
-
-        <div id="editor" class="memo-editor" contenteditable="true" spellcheck="false"></div>
-
         <footer class="panel-footer">
           <button id="addIndexButton" class="small-button" type="button">새 메모</button>
-          <span id="saveStatus" class="save-status">저장됨</span>
+          <div class="footer-control-stack">
+            <div class="footer-meta-row">
+              <span id="saveStatus" class="save-status">저장됨</span>
+              <span id="footerOpacityValue" class="footer-opacity-value">투명도 0%</span>
+            </div>
+            <label class="footer-opacity-field" title="현재 메모 배경 투명도">
+              <span>투명도</span>
+              <input id="footerOpacityInput" type="range" min="0" max="1" step="0.05" />
+            </label>
+          </div>
         </footer>
 
-        <div id="panelResizeGrip" class="panel-resize-grip panel-resize-height" data-resize-axis="height" title="세로 크기 조절" aria-hidden="true"></div>
-        <div id="panelResizeWidthGrip" class="panel-resize-grip panel-resize-width" data-resize-axis="width" title="가로 크기 조절" aria-hidden="true"></div>
-        <div id="panelResizeCornerGrip" class="panel-resize-grip panel-resize-corner" data-resize-axis="both" title="가로세로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeGrip" class="panel-resize-grip panel-resize-edge panel-resize-bottom" data-resize-axis="height" data-resize-edge="bottom" title="세로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeTopGrip" class="panel-resize-grip panel-resize-edge panel-resize-top" data-resize-axis="height" data-resize-edge="top" title="세로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeWidthGrip" class="panel-resize-grip panel-resize-edge panel-resize-left" data-resize-axis="width" data-resize-edge="left" title="가로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeRightGrip" class="panel-resize-grip panel-resize-edge panel-resize-right" data-resize-axis="width" data-resize-edge="right" title="가로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeCornerGrip" class="panel-resize-grip panel-resize-corner panel-resize-bottom-left" data-resize-axis="both" data-resize-edge="bottom-left" title="가로세로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeTopLeftGrip" class="panel-resize-grip panel-resize-corner panel-resize-top-left" data-resize-axis="both" data-resize-edge="top-left" title="가로세로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeTopRightGrip" class="panel-resize-grip panel-resize-corner panel-resize-top-right" data-resize-axis="both" data-resize-edge="top-right" title="가로세로 크기 조절" aria-hidden="true"></div>
+        <div id="panelResizeBottomRightGrip" class="panel-resize-grip panel-resize-corner panel-resize-bottom-right" data-resize-axis="both" data-resize-edge="bottom-right" title="가로세로 크기 조절" aria-hidden="true"></div>
       </section>
 
       <aside id="settingsPane" class="settings-pane" aria-label="설정">
@@ -125,7 +148,20 @@
         </div>
 
         <section class="settings-section">
-          <h3>공통 기본값</h3>
+          <h3>전체 표시</h3>
+          <label class="field">
+            <span>전체 글씨체</span>
+            <select id="commonFontFamilySelect"></select>
+          </label>
+          <label class="field">
+            <span>전체 글씨체 크기</span>
+            <input id="commonFontSizeSelect" type="number" min="9" max="24" step="1" />
+          </label>
+          <p class="hint-text">설정, 버튼, 목록처럼 메모 내용 밖에 보이는 글씨체입니다.</p>
+        </section>
+
+        <section class="settings-section">
+          <h3>새 메모 기본값</h3>
           <div class="default-fields">
             <label class="field">
               <span>새 메모 글씨체</span>
@@ -133,14 +169,17 @@
             </label>
             <label class="field">
               <span>새 메모 크기</span>
-              <select id="defaultFontSizeSelect"></select>
+              <input id="defaultFontSizeSelect" type="number" min="8" max="96" step="1" />
             </label>
             <label class="field">
               <span>새 메모 줄간격</span>
-              <select id="defaultLineSpacingSelect"></select>
+              <input id="defaultLineSpacingSelect" type="number" min="0.8" max="4" step="0.05" />
             </label>
           </div>
-          <p class="hint-text">새로 만드는 메모는 이 기본값으로 시작합니다.</p>
+          <div class="data-actions">
+            <button id="importFontButton" class="small-button" type="button">글씨체 추가</button>
+          </div>
+          <p class="hint-text">새로 만드는 메모는 이 기본값으로 시작합니다. 글씨체 파일은 ttf, otf, woff 형식을 추가할 수 있습니다.</p>
         </section>
 
         <section class="settings-section">
@@ -182,7 +221,6 @@
           <label class="field">
             <span>패널 길이</span>
             <select id="lengthSelect">
-              <option value="short">짧게</option>
               <option value="normal">보통</option>
               <option value="long">길게</option>
               <option value="custom">자유 지정</option>
@@ -223,7 +261,7 @@
             <span>컴퓨터를 켜면 자동 실행</span>
           </label>
 
-          <label class="check-field">
+          <label class="check-field hidden">
             <input id="startupGuideInput" type="checkbox" />
             <span>앱이 켜질 때 안내 표시</span>
           </label>
@@ -266,6 +304,28 @@
             <button id="launchGuideSettingsButton" class="small-button" type="button">설정</button>
             <button id="launchGuideBlogButton" class="small-button" type="button">문의 블로그</button>
             <button id="closeLaunchGuideButton" class="small-button" type="button">닫기</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="backgroundCropper" class="cropper-overlay hidden" role="dialog" aria-modal="true" aria-label="배경 자르기">
+        <div class="cropper-panel">
+          <div class="cropper-header">
+            <strong>배경 자르기</strong>
+            <button id="cropperCancelButton" class="icon-button" type="button" title="닫기">×</button>
+          </div>
+          <div id="cropperStage" class="cropper-stage">
+            <img id="cropperImage" alt="" />
+            <div id="cropperBox" class="cropper-box">
+              <span class="cropper-handle nw" data-crop-handle="nw"></span>
+              <span class="cropper-handle ne" data-crop-handle="ne"></span>
+              <span class="cropper-handle sw" data-crop-handle="sw"></span>
+              <span class="cropper-handle se" data-crop-handle="se"></span>
+            </div>
+          </div>
+          <div class="cropper-actions">
+            <button id="cropperResetButton" class="small-button" type="button">전체</button>
+            <button id="cropperApplyButton" class="primary-button" type="button">등록</button>
           </div>
         </div>
       </div>
