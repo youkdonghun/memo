@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } = require("electron");
+const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } = require("electron");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -65,6 +65,7 @@ let settingsOpen = false;
 let temporaryPanelWidth = null;
 let sideTitleEditOpen = false;
 let settingsSaveTimer = null;
+let startupNotificationShown = false;
 const detachedWindows = new Map();
 const detachedMemos = new Map();
 
@@ -749,6 +750,44 @@ function createTray() {
   refreshTrayMenu();
 }
 
+function showBackgroundStartupNotification() {
+  if (startupNotificationShown) return;
+  startupNotificationShown = true;
+
+  const title = "MEMO BOM";
+  const body = "백그라운드에서 실행 중입니다. 트레이 아이콘을 눌러 메모를 열 수 있습니다.";
+  const iconPath = resolveIconPath();
+
+  try {
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title,
+        body,
+        icon: iconPath || undefined,
+        silent: true
+      });
+      notification.on("click", () => sendRendererCommand("shortcut:cycle-floating"));
+      notification.show();
+      return;
+    }
+  } catch {
+    // Fall back to the tray balloon below when native notifications are unavailable.
+  }
+
+  if (process.platform === "win32" && tray?.displayBalloon) {
+    try {
+      tray.displayBalloon({
+        title,
+        content: body,
+        icon: iconPath ? nativeImage.createFromPath(iconPath) : createIconImage(),
+        noSound: true
+      });
+    } catch {
+      // Notification support depends on the Windows notification settings.
+    }
+  }
+}
+
 function createMainWindow() {
   const display = getTargetDisplay();
   const bounds = getWindowBounds(display);
@@ -816,6 +855,7 @@ if (!gotSingleInstanceLock) {
     registerShortcuts();
     createMainWindow();
     createTray();
+    setTimeout(showBackgroundStartupNotification, 500);
 
     screen.on("display-added", () => refreshWindowBounds(true));
     screen.on("display-removed", () => refreshWindowBounds(true));
@@ -915,9 +955,10 @@ ipcMain.handle("memo:detached-get", (event) => ({
   memo: detachedMemoForSender(event.sender)
 }));
 
-ipcMain.handle("memo:detached-update", (event, memo) => {
+ipcMain.handle("memo:detached-update", (event, memoPatch = {}) => {
   const current = detachedMemoForSender(event.sender);
-  const next = normalizeDetachedMemo({ ...current, ...memo });
+  if (!current) return { ok: false, message: "DETACHED_MEMO_NOT_FOUND" };
+  const next = normalizeDetachedMemo({ ...current, ...memoPatch, id: current.id });
   detachedMemos.set(next.id, next);
   const senderWindow = BrowserWindow.fromWebContents(event.sender);
   if (senderWindow && !senderWindow.isDestroyed()) senderWindow.setTitle(next.title);

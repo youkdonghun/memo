@@ -32,6 +32,10 @@ const FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28,
 const LINE_SPACING_OPTIONS = [0.8, 1, 1.15, 1.5, 2, 2.5, 3, 3.5, 4];
 const HANDLE_REORDER_THRESHOLD = 8;
 const MAX_RECENT_TEXT_COLORS = 6;
+const CARRIED_TYPING_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color"];
+const CARRIED_LIST_BLOCK_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color", "lineHeight"];
+const PERF_WARN_MS = 16;
+const PERF_SLOW_WARN_MS = 50;
 const TEXT_COLOR_PRESETS = [
   "#283044",
   "#111827",
@@ -111,6 +115,18 @@ function createId() {
   return `memo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function measureInteraction(label, fn, threshold = PERF_WARN_MS) {
+  const start = performance.now();
+  try {
+    return fn();
+  } finally {
+    const elapsed = performance.now() - start;
+    if (elapsed > threshold) {
+      console.warn(`[perf] ${label}: ${Math.round(elapsed * 10) / 10}ms`);
+    }
+  }
+}
+
 function createMemo(index = 0, defaults = defaultMemoDefaults) {
   const memoDefaults = normalizeMemoDefaults(defaults);
   return {
@@ -172,6 +188,11 @@ let customFonts = [];
 let editorHistory = [];
 let editorHistoryIndex = -1;
 let applyingHistory = false;
+let pendingEditorHistorySnapshot = null;
+let pendingEditorHistoryNeedsSnapshot = false;
+let editorDirty = false;
+let toolbarRefreshFrame = null;
+let tableToolsRefreshFrame = null;
 let panelResizeState = null;
 let pendingResizeSize = null;
 let resizeFrame = null;
@@ -183,6 +204,7 @@ let sideTitleEditor = null;
 let lastTableCell = null;
 let tableSelectionState = null;
 let tableDragSelectState = null;
+let lastRenderedTableSelection = { table: null, cells: new Set(), activeCell: null };
 let detachedMemoPlacements = new Map();
 let pendingNudgeDelta = 0;
 let nudgeFrame = null;
@@ -200,6 +222,7 @@ const activePopupButton = document.getElementById("activePopupButton");
 const memoListPanel = document.getElementById("memoListPanel");
 const closeMemoListButton = document.getElementById("closeMemoListButton");
 const allMemoList = document.getElementById("allMemoList");
+const allMemoListStatus = document.getElementById("allMemoListStatus");
 const memoSearchPanel = document.getElementById("memoSearchPanel");
 const closeMemoSearchButton = document.getElementById("closeMemoSearchButton");
 const memoSearchInput = document.getElementById("memoSearchInput");
@@ -213,7 +236,6 @@ const toolbarToggleButton = document.getElementById("toolbarToggleButton");
 const settingsButton = document.getElementById("settingsButton");
 const deleteActiveMemoButton = document.getElementById("deleteActiveMemoButton");
 const closeSettingsButton = document.getElementById("closeSettingsButton");
-const addIndexButton = document.getElementById("addIndexButton");
 const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
 const clearButton = document.getElementById("clearButton");
@@ -236,7 +258,7 @@ const splitTableCellButton = document.getElementById("splitTableCellButton");
 const tableBorderColorInput = document.getElementById("tableBorderColorInput");
 const tableBorderWidthInput = document.getElementById("tableBorderWidthInput");
 const tableCellColorInput = document.getElementById("tableCellColorInput");
-const tableFillColorInput = document.getElementById("tableFillColorInput");
+const tableCellColorButtons = document.querySelectorAll("[data-table-cell-color]");
 const clearTableCellColorButton = document.getElementById("clearTableCellColorButton");
 const deleteTableButton = document.getElementById("deleteTableButton");
 const textColorInput = document.getElementById("textColorInput");
@@ -957,12 +979,13 @@ function syncBackgroundControls(memo) {
   syncFooterOpacity(memo?.backgroundOpacity);
 }
 
-function saveState() {
+function saveState(options = {}) {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  const nextStateJson = JSON.stringify(state);
+  if (options.flushEditor !== false) flushEditorToMemo({ scheduleSave: false });
+  const nextStateJson = measureInteraction("saveState.stringify", () => JSON.stringify(state), PERF_SLOW_WARN_MS);
   if (nextStateJson !== lastSavedStateJson) {
     localStorage.setItem(STORAGE_KEY, nextStateJson);
     lastSavedStateJson = nextStateJson;
@@ -1063,7 +1086,8 @@ async function applyImportedState(imported) {
   });
   state = nextState;
   detachedMemoPlacements = new Map();
-  saveState();
+  editorDirty = false;
+  saveState({ flushEditor: false });
   renderActiveMemo();
   applyCommonTypography();
   syncShellLayoutClasses();
@@ -1082,33 +1106,70 @@ function floatingMemos() {
   return state.floatingIds.map((id) => byId.get(id)).filter(Boolean);
 }
 
-function persistEditor() {
+function markEditorDirty() {
+  const memo = activeMemo();
+  if (!memo || applyingHistory) return;
+  editorDirty = true;
+  memo.updatedAt = Date.now();
+  scheduleEditorFlush();
+}
+
+function scheduleEditorFlush() {
+  scheduleSave();
+}
+
+function flushEditorToMemo(options = {}) {
+  const { force = false, scheduleSave: shouldScheduleSave = true } = options;
   const memo = activeMemo();
   if (!memo) return "";
+  if (!force && !editorDirty) return memo.html || "";
   const snapshot = serializedEditorHtml();
   memo.html = snapshot;
   memo.updatedAt = Date.now();
-  scheduleSave();
+  editorDirty = false;
+  if (pendingEditorHistoryNeedsSnapshot && pendingEditorHistorySnapshot === null) {
+    pendingEditorHistorySnapshot = snapshot;
+    pendingEditorHistoryNeedsSnapshot = false;
+  }
+  if (shouldScheduleSave) scheduleSave();
   return snapshot;
 }
 
+function persistEditor() {
+  return flushEditorToMemo({ force: true });
+}
+
 function serializedEditorHtml() {
-  const clone = editor.cloneNode(true);
-  stripTransientTableSelection(clone);
-  clone.querySelectorAll(".check-text").forEach((text) => {
-    text.textContent = text.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
-  });
-  clone.querySelectorAll(".typing-style-anchor").forEach((anchor) => {
-    anchor.textContent = anchor.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
-    if (!anchor.textContent.trim() && !anchor.querySelector("br, img, table")) anchor.remove();
-  });
-  return clone.innerHTML;
+  return measureInteraction("serializedEditorHtml", () => {
+    const clone = editor.cloneNode(true);
+    stripTransientTableSelection(clone);
+    prepareChecklistItems(clone);
+    clone.querySelectorAll(".check-text").forEach((text) => {
+      text.textContent = text.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
+    });
+    clone.querySelectorAll(".typing-style-anchor").forEach((anchor) => {
+      anchor.textContent = anchor.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
+      if (!anchor.textContent.trim() && !anchor.querySelector("br, img, table")) anchor.remove();
+    });
+    return clone.innerHTML;
+  }, PERF_WARN_MS);
 }
 
 function clearPendingEditorHistory() {
-  if (!historyTimer) return;
-  clearTimeout(historyTimer);
+  if (historyTimer) clearTimeout(historyTimer);
   historyTimer = null;
+  pendingEditorHistorySnapshot = null;
+  pendingEditorHistoryNeedsSnapshot = false;
+}
+
+function flushPendingEditorHistory() {
+  if (!historyTimer && pendingEditorHistorySnapshot === null && !pendingEditorHistoryNeedsSnapshot) return;
+  const snapshot = pendingEditorHistorySnapshot ?? serializedEditorHtml();
+  if (historyTimer) clearTimeout(historyTimer);
+  historyTimer = null;
+  pendingEditorHistorySnapshot = null;
+  pendingEditorHistoryNeedsSnapshot = false;
+  pushEditorHistory(snapshot);
 }
 
 function trimEditorHistory() {
@@ -1145,9 +1206,19 @@ function pushEditorHistory(snapshot = serializedEditorHtml()) {
 function queueEditorHistory(snapshot = null) {
   if (applyingHistory) return;
   if (historyTimer) clearTimeout(historyTimer);
+  if (snapshot === null) {
+    pendingEditorHistorySnapshot = null;
+    pendingEditorHistoryNeedsSnapshot = true;
+  } else {
+    pendingEditorHistorySnapshot = snapshot;
+    pendingEditorHistoryNeedsSnapshot = false;
+  }
   historyTimer = setTimeout(() => {
+    const nextSnapshot = pendingEditorHistorySnapshot ?? serializedEditorHtml();
     historyTimer = null;
-    pushEditorHistory(snapshot ?? serializedEditorHtml());
+    pendingEditorHistorySnapshot = null;
+    pendingEditorHistoryNeedsSnapshot = false;
+    pushEditorHistory(nextSnapshot);
   }, HISTORY_DEBOUNCE_MS);
 }
 
@@ -1163,16 +1234,19 @@ function applyEditorHistorySnapshot(snapshot) {
   editor.innerHTML = snapshot || "";
   prepareChecklistItems();
   applyingHistory = false;
-  persistEditor();
+  editorDirty = true;
+  flushEditorToMemo();
 }
 
 function undoEditor() {
+  flushPendingEditorHistory();
   if (editorHistoryIndex <= 0) return;
   editorHistoryIndex -= 1;
   applyEditorHistorySnapshot(editorHistory[editorHistoryIndex]);
 }
 
 function redoEditor() {
+  flushPendingEditorHistory();
   if (editorHistoryIndex >= editorHistory.length - 1) return;
   editorHistoryIndex += 1;
   applyEditorHistorySnapshot(editorHistory[editorHistoryIndex]);
@@ -1741,6 +1815,8 @@ function renderActiveMemo() {
   setTableToolsOpen(false);
   clearTableSelection();
   editor.innerHTML = memo.html || "";
+  editorDirty = false;
+  lastRenderedTableSelection = { table: null, cells: new Set(), activeCell: null };
   prepareChecklistItems();
   resetEditorHistory();
   updateToolbarCommandState();
@@ -1769,16 +1845,29 @@ function setMemoListOpen(open) {
   }
 }
 
+function setAllMemoListStatus(message, timeout = 2500) {
+  if (!allMemoListStatus) return;
+  allMemoListStatus.textContent = message || "";
+  if (message && timeout) {
+    setTimeout(() => {
+      if (allMemoListStatus.textContent === message) allMemoListStatus.textContent = "";
+    }, timeout);
+  }
+}
+
 function renderAllMemoList() {
   if (!allMemoList) return;
   allMemoList.innerHTML = "";
 
   state.indexes.forEach((memo, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "all-memo-item";
-    if (memo.id === state.activeId) button.classList.add("active");
-    button.dataset.id = memo.id;
+    const item = document.createElement("div");
+    item.className = "all-memo-item";
+    if (memo.id === state.activeId) item.classList.add("active");
+    item.dataset.id = memo.id;
+
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "all-memo-open";
 
     const swatch = document.createElement("span");
     swatch.className = "all-memo-color";
@@ -1788,17 +1877,29 @@ function renderAllMemoList() {
     title.className = "all-memo-title";
     title.textContent = memo.title || `메모 ${index + 1}`;
 
-    const status = document.createElement("span");
-    status.className = "all-memo-status";
-    status.textContent = state.floatingIds.includes(memo.id) ? "플로팅" : "일반";
+    const isFloating = state.floatingIds.includes(memo.id);
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.className = "all-memo-floating-toggle";
+    toggleButton.classList.toggle("floating", isFloating);
+    toggleButton.textContent = isFloating ? "플로팅" : "일반";
+    const isLastFloatingMemo = isFloating && state.floatingIds.length <= 1;
+    toggleButton.disabled = isLastFloatingMemo;
+    toggleButton.title = isLastFloatingMemo ? "플로팅 메모는 최소 1개 필요" : isFloating ? "일반 메모로 변경" : "플로팅 메모로 변경";
+    toggleButton.setAttribute("aria-pressed", String(isFloating));
 
-    button.append(swatch, title, status);
-    button.addEventListener("click", () => {
+    openButton.append(swatch, title);
+    openButton.addEventListener("click", () => {
       selectMemo(memo.id);
       setMemoListOpen(false);
       setExpanded(true);
     });
-    allMemoList.appendChild(button);
+    toggleButton.addEventListener("click", () => {
+      setFloatingMemo(memo.id, !isFloating, { showLimitMessage: true });
+    });
+
+    item.append(openButton, toggleButton);
+    allMemoList.appendChild(item);
   });
 }
 
@@ -2017,6 +2118,7 @@ function closeLaunchGuide() {
 }
 
 function execCommand(command, value = null) {
+  flushPendingEditorHistory();
   editor.focus();
   document.execCommand(command, false, value);
   updateToolbarCommandState();
@@ -2041,6 +2143,22 @@ function updateToolbarCommandState() {
     button.classList.toggle("active", active);
   });
   if (inEditor) syncToolbarSelectionValues(range);
+}
+
+function scheduleToolbarRefresh() {
+  if (toolbarRefreshFrame) return;
+  toolbarRefreshFrame = requestAnimationFrame(() => {
+    toolbarRefreshFrame = null;
+    measureInteraction("updateToolbarCommandState", updateToolbarCommandState);
+  });
+}
+
+function scheduleTableToolsRefresh() {
+  if (tableToolsRefreshFrame) return;
+  tableToolsRefreshFrame = requestAnimationFrame(() => {
+    tableToolsRefreshFrame = null;
+    updateTableTools();
+  });
 }
 
 function focusEditorAtEnd() {
@@ -2097,12 +2215,19 @@ function selectWrappedTextNodes(operations) {
   return true;
 }
 
-function insertTypingStyleAnchor(range, property, value) {
+function createTypingStyleAnchor(styles = {}) {
   const span = document.createElement("span");
   span.className = "typing-style-anchor";
-  span.style[property] = value;
+  Object.entries(styles).forEach(([property, value]) => {
+    if (value) span.style[property] = value;
+  });
   const textNode = document.createTextNode(CHECK_TEXT_PLACEHOLDER);
   span.appendChild(textNode);
+  return { span, textNode };
+}
+
+function insertTypingStyleAnchor(range, property, value) {
+  const { span, textNode } = createTypingStyleAnchor({ [property]: value });
   range.insertNode(span);
 
   const nextRange = document.createRange();
@@ -2419,12 +2544,89 @@ function ensureChecklistTextNode(text) {
   return textNode;
 }
 
-function placeCaretInCheckText(text) {
+function checklistItemIsChecked(item) {
+  if (!item) return false;
+  if (item.dataset.checked === "true") return true;
+  if (item.dataset.checked === "false") return false;
+  const box = item.querySelector(".check-box");
+  return (
+    item.classList.contains("checked") ||
+    box?.getAttribute("aria-checked") === "true" ||
+    box?.textContent?.trim() === "\u2611"
+  );
+}
+
+function syncChecklistItemState(item, checked = checklistItemIsChecked(item)) {
+  if (!item) return { box: null, text: null, checked: false };
+  let box = item.querySelector(".check-box");
+  let text = item.querySelector(".check-text");
+
+  if (!box) {
+    box = document.createElement("span");
+    box.className = "check-box";
+    item.prepend(box);
+  }
+  if (!text) {
+    text = document.createElement("span");
+    text.className = "check-text";
+    item.appendChild(text);
+  }
+
+  item.dataset.checked = checked ? "true" : "false";
+  item.classList.toggle("checked", checked);
+  box.contentEditable = "false";
+  box.setAttribute("role", "checkbox");
+  box.setAttribute("aria-checked", checked ? "true" : "false");
+  box.textContent = checked ? "\u2611" : "\u2610";
+  ensureChecklistTextNode(text);
+
+  return { box, text, checked };
+}
+
+function setChecklistText(text, value) {
+  if (!text) return null;
+  text.textContent = value || CHECK_TEXT_PLACEHOLDER;
+  return ensureChecklistTextNode(text);
+}
+
+function checklistTextValue(text) {
+  const value = text?.textContent ?? text?.toString?.() ?? "";
+  return String(value).replaceAll(CHECK_TEXT_PLACEHOLDER, "");
+}
+
+function splitChecklistTextAtSelection(text) {
+  ensureChecklistTextNode(text);
+  const range = currentEditorRange();
+  if (
+    !range ||
+    !text?.contains(range.startContainer) ||
+    !text.contains(range.endContainer)
+  ) {
+    return "";
+  }
+
+  const beforeRange = document.createRange();
+  beforeRange.selectNodeContents(text);
+  beforeRange.setEnd(range.startContainer, range.startOffset);
+
+  const afterRange = document.createRange();
+  afterRange.selectNodeContents(text);
+  afterRange.setStart(range.endContainer, range.endOffset);
+
+  const before = checklistTextValue(beforeRange);
+  const after = checklistTextValue(afterRange);
+  setChecklistText(text, before);
+  return after;
+}
+
+function placeCaretInCheckText(text, offset = null) {
   const textNode = ensureChecklistTextNode(text);
   if (!textNode) return;
   editor.focus();
   const range = document.createRange();
-  range.setStart(textNode, textNode.nodeValue.length);
+  const caretOffset =
+    Number.isInteger(offset) ? Math.max(0, Math.min(offset, textNode.nodeValue.length)) : textNode.nodeValue.length;
+  range.setStart(textNode, caretOffset);
   range.collapse(true);
   const selection = window.getSelection();
   selection.removeAllRanges();
@@ -2453,26 +2655,7 @@ function createChecklistItem(checked = false) {
 
 function prepareChecklistItems(root = editor) {
   root.querySelectorAll(".check-item").forEach((item) => {
-    const checked = item.dataset.checked === "true";
-    let box = item.querySelector(".check-box");
-    let text = item.querySelector(".check-text");
-
-    if (!box) {
-      box = document.createElement("span");
-      box.className = "check-box";
-      item.prepend(box);
-    }
-    box.contentEditable = "false";
-    box.setAttribute("role", "checkbox");
-    box.setAttribute("aria-checked", checked ? "true" : "false");
-    box.textContent = checked ? "\u2611" : "\u2610";
-
-    if (!text) {
-      text = document.createElement("span");
-      text.className = "check-text";
-      item.appendChild(text);
-    }
-    ensureChecklistTextNode(text);
+    syncChecklistItemState(item);
   });
 }
 
@@ -2494,6 +2677,7 @@ function insertNodeAtSelection(node) {
 }
 
 function insertChecklist() {
+  flushPendingEditorHistory();
   editor.focus();
   const { item, text } = createChecklistItem(false);
   insertNodeAtSelection(item);
@@ -2716,34 +2900,36 @@ function setTableToolsOpen(open) {
 }
 
 function updateTableTools() {
-  const cell = selectedTableCell();
-  const existingCells = activeTableSelectionCells();
+  return measureInteraction("updateTableTools", () => {
+    const cell = selectedTableCell();
+    const existingCells = activeTableSelectionCells();
 
-  if (cell) {
-    lastTableCell = cell;
-    const table = cell.closest(".memo-table");
-    const keepRange =
-      existingCells.length > 1 &&
-      tableSelectionState?.table === table &&
-      existingCells.includes(cell);
-    if (!keepRange && !tableDragSelectState) {
-      const nativeCells = nativeSelectedTableCells(table);
-      if (nativeCells.length > 1) setTableSelection(nativeCells[0], nativeCells[nativeCells.length - 1], nativeCells);
-      else setTableSelection(cell, cell);
-    } else {
-      renderTableSelection();
+    if (cell) {
+      lastTableCell = cell;
+      const table = cell.closest(".memo-table");
+      const keepRange =
+        existingCells.length > 1 &&
+        tableSelectionState?.table === table &&
+        existingCells.includes(cell);
+      if (!keepRange && !tableDragSelectState) {
+        const nativeCells = nativeSelectedTableCells(table);
+        if (nativeCells.length > 1) setTableSelection(nativeCells[0], nativeCells[nativeCells.length - 1], nativeCells);
+        else setTableSelection(cell, cell);
+      } else {
+        renderTableSelection();
+      }
+      setTableToolsOpen(true);
+      return;
     }
-    setTableToolsOpen(true);
-    return;
-  }
 
-  if (existingCells.length) {
-    renderTableSelection();
-    setTableToolsOpen(true);
-    return;
-  }
+    if (existingCells.length) {
+      renderTableSelection();
+      setTableToolsOpen(true);
+      return;
+    }
 
-  setTableToolsOpen(false);
+    setTableToolsOpen(false);
+  });
 }
 
 function tableCells(table) {
@@ -2762,12 +2948,21 @@ function stripTransientTableSelection(root) {
 }
 
 function clearTableSelectionClasses() {
-  editor.querySelectorAll(".memo-table.table-selected").forEach((table) => {
-    table.classList.remove("table-selected");
+  const rendered = lastRenderedTableSelection;
+  if (rendered.table?.isConnected) rendered.table.classList.remove("table-selected");
+  rendered.cells.forEach((cell) => {
+    if (cell?.isConnected) cell.classList.remove("memo-table-cell-selected", "memo-table-cell-active");
   });
-  editor.querySelectorAll(".memo-table-cell-selected, .memo-table-cell-active").forEach((cell) => {
-    cell.classList.remove("memo-table-cell-selected", "memo-table-cell-active");
-  });
+  if (rendered.activeCell?.isConnected) rendered.activeCell.classList.remove("memo-table-cell-active");
+  if (!rendered.table && !rendered.cells.size) {
+    editor.querySelectorAll(".memo-table.table-selected").forEach((table) => {
+      table.classList.remove("table-selected");
+    });
+    editor.querySelectorAll(".memo-table-cell-selected, .memo-table-cell-active").forEach((cell) => {
+      cell.classList.remove("memo-table-cell-selected", "memo-table-cell-active");
+    });
+  }
+  lastRenderedTableSelection = { table: null, cells: new Set(), activeCell: null };
 }
 
 function clearTableSelection(options = {}) {
@@ -2899,16 +3094,38 @@ function setTableSelection(anchorCell, focusCell, explicitCells = null) {
 }
 
 function renderTableSelection() {
-  clearTableSelectionClasses();
-  const cells = activeTableSelectionCells();
-  const table = tableSelectionState?.table;
-  if (!table || !cells.length) return;
+  return measureInteraction("renderTableSelection", () => {
+    const cells = activeTableSelectionCells();
+    const table = tableSelectionState?.table;
+    if (!table || !cells.length) {
+      clearTableSelectionClasses();
+      return;
+    }
 
-  cells.forEach((cell) => cell.classList.add("memo-table-cell-selected"));
-  const activeCell = activeTableSelectionCell() || cells[cells.length - 1];
-  activeCell?.classList.add("memo-table-cell-active");
+    const activeCell = activeTableSelectionCell() || cells[cells.length - 1];
+    const nextCells = new Set(cells);
+    const previous = lastRenderedTableSelection;
 
-  if (cells.length === tableCells(table).length) table.classList.add("table-selected");
+    if (previous.table && previous.table !== table && previous.table.isConnected) {
+      previous.table.classList.remove("table-selected");
+    }
+
+    previous.cells.forEach((cell) => {
+      if (!cell?.isConnected || !nextCells.has(cell)) {
+        cell?.classList.remove("memo-table-cell-selected", "memo-table-cell-active");
+      }
+    });
+    if (previous.activeCell && previous.activeCell !== activeCell && previous.activeCell.isConnected) {
+      previous.activeCell.classList.remove("memo-table-cell-active");
+    }
+
+    cells.forEach((cell) => cell.classList.add("memo-table-cell-selected"));
+    activeCell?.classList.add("memo-table-cell-active");
+
+    const allSelected = cells.length === tableCells(table).length;
+    table.classList.toggle("table-selected", allSelected);
+    lastRenderedTableSelection = { table, cells: nextCells, activeCell };
+  });
 }
 
 function isEffectivelyBlankCell(cell) {
@@ -3051,8 +3268,9 @@ function applyTableBorder() {
   pushEditorHistory();
 }
 
-function applyTableCellColor() {
-  const color = normalizeHexColor(tableCellColorInput?.value, "#ffffff");
+function applyTableCellColorValue(value) {
+  const color = normalizeHexColor(value, "#ffffff");
+  if (tableCellColorInput) tableCellColorInput.value = color;
   targetTableCells().forEach((cell) => {
     cell.style.backgroundColor = color;
   });
@@ -3060,15 +3278,8 @@ function applyTableCellColor() {
   pushEditorHistory();
 }
 
-function applyTableFillColor() {
-  const table = currentMemoTable();
-  const color = normalizeHexColor(tableFillColorInput?.value, "#ffffff");
-  if (!table) return;
-  tableCells(table).forEach((cell) => {
-    cell.style.backgroundColor = color;
-  });
-  persistEditor();
-  pushEditorHistory();
+function applyTableCellColor() {
+  applyTableCellColorValue(tableCellColorInput?.value);
 }
 
 function clearTableCellColor() {
@@ -3256,15 +3467,10 @@ function endTableCellSelection(event) {
 function toggleChecklistItem(target) {
   const item = target.closest(".check-item");
   if (!item) return;
-  const checked = item.dataset.checked === "true";
-  item.dataset.checked = checked ? "false" : "true";
-  const box = item.querySelector(".check-box");
-  if (box) {
-    box.textContent = checked ? "\u2610" : "\u2611";
-    box.setAttribute("aria-checked", checked ? "false" : "true");
-  }
-  item.classList.toggle("checked", !checked);
-  placeCaretInCheckText(item.querySelector(".check-text"));
+  flushPendingEditorHistory();
+  const checked = checklistItemIsChecked(item);
+  const { text } = syncChecklistItemState(item, !checked);
+  placeCaretInCheckText(text);
   persistEditor();
   pushEditorHistory();
 }
@@ -3276,9 +3482,10 @@ function currentChecklistItem() {
 function handleChecklistKeydown(event) {
   if (event.key !== "Enter" || event.shiftKey) return;
   const item = currentChecklistItem();
-  if (!item) return;
+  if (!item || !editor.contains(item)) return;
 
   event.preventDefault();
+  flushPendingEditorHistory();
   const currentText = item.querySelector(".check-text");
   if (isBlankEditorText(currentText?.textContent)) {
     const blankLine = createBlankLine();
@@ -3289,15 +3496,121 @@ function handleChecklistKeydown(event) {
     return;
   }
 
+  const nextTextValue = splitChecklistTextAtSelection(currentText);
   const { item: nextItem, text } = createChecklistItem(false);
+  setChecklistText(text, nextTextValue);
   item.after(nextItem);
-  placeCaretInCheckText(text);
+  placeCaretInCheckText(text, nextTextValue ? 0 : null);
   persistEditor();
   pushEditorHistory();
 }
 
 function currentListItem() {
   return getSelectionElement()?.closest("li") || null;
+}
+
+function selectionElementFromRange(range) {
+  if (!range) return null;
+  const node = range.startContainer;
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const child = node.childNodes[Math.max(0, range.startOffset - 1)] || node.childNodes[range.startOffset] || node;
+    return child.nodeType === Node.ELEMENT_NODE ? child : child.parentElement;
+  }
+  return node.parentElement;
+}
+
+function carriedTypingStylesFromRange(range = currentEditorRange()) {
+  const element = selectionElementFromRange(range);
+  if (!element || !editor.contains(element)) return {};
+  const block = closestLineBlock(element);
+  const chain = [];
+  let current = element;
+
+  while (current && current !== editor && editor.contains(current)) {
+    if (current instanceof HTMLElement) chain.push(current);
+    if (current === block) break;
+    current = current.parentElement;
+  }
+
+  return chain.reverse().reduce((styles, node) => {
+    CARRIED_TYPING_STYLE_PROPERTIES.forEach((property) => {
+      if (node.style[property]) styles[property] = node.style[property];
+    });
+    return styles;
+  }, {});
+}
+
+function copyListItemBlockStyles(source, target) {
+  if (!(source instanceof HTMLElement) || !(target instanceof HTMLElement)) return;
+  CARRIED_LIST_BLOCK_STYLE_PROPERTIES.forEach((property) => {
+    if (source.style[property]) target.style[property] = source.style[property];
+  });
+}
+
+function placeCaretInTextNode(textNode, offset = 0) {
+  if (!textNode) return;
+  editor.focus();
+  const range = document.createRange();
+  range.setStart(textNode, Math.max(0, Math.min(offset, textNode.nodeValue.length)));
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+}
+
+function insertListTypingAnchor(item, styles) {
+  const { span, textNode } = createTypingStyleAnchor(styles);
+  item.insertBefore(span, item.firstChild);
+  return textNode;
+}
+
+function ensureListItemEditable(item) {
+  if (!item.childNodes.length) item.appendChild(document.createElement("br"));
+}
+
+function splitListItemAtSelection(item) {
+  const range = currentEditorRange();
+  const typingStyles = carriedTypingStylesFromRange(range);
+  const nextItem = document.createElement("li");
+  copyListItemBlockStyles(item, nextItem);
+
+  if (range && item.contains(range.startContainer) && item.contains(range.endContainer)) {
+    range.deleteContents();
+    const tailRange = document.createRange();
+    tailRange.setStart(range.startContainer, range.startOffset);
+    tailRange.setEnd(item, item.childNodes.length);
+    const tail = tailRange.extractContents();
+    if (tail.childNodes.length) nextItem.appendChild(tail);
+  }
+
+  ensureListItemEditable(item);
+  const textNode = insertListTypingAnchor(nextItem, typingStyles);
+  item.after(nextItem);
+  placeCaretInTextNode(textNode, textNode.nodeValue.length);
+}
+
+function exitListAtItem(list, item) {
+  const blankLine = createBlankLine();
+  const trailingItems = [];
+  let next = item.nextSibling;
+  while (next) {
+    trailingItems.push(next);
+    next = next.nextSibling;
+  }
+
+  const trailingList = trailingItems.length ? list.cloneNode(false) : null;
+  trailingItems.forEach((node) => trailingList.appendChild(node));
+  item.remove();
+
+  if (!list.children.length) {
+    list.replaceWith(blankLine, ...(trailingList ? [trailingList] : []));
+  } else {
+    list.after(blankLine);
+    if (trailingList) blankLine.after(trailingList);
+  }
+
+  placeCaretInBlock(blankLine);
 }
 
 function handleListKeydown(event) {
@@ -3309,24 +3622,15 @@ function handleListKeydown(event) {
   if (!list || !["UL", "OL"].includes(list.tagName)) return;
 
   event.preventDefault();
+  flushPendingEditorHistory();
   if (!isBlankEditorText(item.textContent)) {
-    const nextItem = document.createElement("li");
-    nextItem.appendChild(document.createElement("br"));
-    item.after(nextItem);
-    placeCaretInBlock(nextItem);
+    splitListItemAtSelection(item);
     persistEditor();
     pushEditorHistory();
     return;
   }
 
-  const blankLine = createBlankLine();
-  if (list.children.length <= 1) {
-    list.replaceWith(blankLine);
-  } else {
-    item.remove();
-    list.after(blankLine);
-  }
-  placeCaretInBlock(blankLine);
+  exitListAtItem(list, item);
   persistEditor();
   pushEditorHistory();
 }
@@ -3621,6 +3925,7 @@ async function fillSettingsForm() {
 
 function renderIndexManager() {
   if (!indexManagerList) return;
+  if (!appShell.classList.contains("settings-open")) return;
   indexManagerList.innerHTML = "";
   floatingLimitText.textContent = `${state.floatingIds.length}/${MAX_FLOATING}개 플로팅 중`;
 
@@ -3823,13 +4128,17 @@ function moveFloatingMemo(id, delta) {
   return true;
 }
 
-function setFloatingMemo(id, shouldFloat) {
+function setFloatingMemo(id, shouldFloat, options = {}) {
   const exists = state.indexes.some((memo) => memo.id === id);
-  if (!exists) return;
+  if (!exists) return false;
   persistEditor();
 
   const alreadyFloating = state.floatingIds.includes(id);
-  if (shouldFloat && !alreadyFloating && state.floatingIds.length < MAX_FLOATING) {
+  if (shouldFloat && !alreadyFloating) {
+    if (state.floatingIds.length >= MAX_FLOATING) {
+      if (options.showLimitMessage) setAllMemoListStatus("플로팅 개수는 최대 5개까지만 가능합니다.");
+      return false;
+    }
     state.floatingIds.push(id);
   }
   if (!shouldFloat && alreadyFloating && state.floatingIds.length > 1) {
@@ -3845,6 +4154,7 @@ function setFloatingMemo(id, shouldFloat) {
     renderIndexManager();
   }
   saveState();
+  return true;
 }
 
 function updateMemoColor(id, color) {
@@ -3980,6 +4290,37 @@ function cropperStageSize() {
   return { width: rect.width, height: rect.height };
 }
 
+function actualBackgroundSurfaceSize() {
+  const rect = panel?.getBoundingClientRect();
+  if (rect?.width && rect?.height) {
+    return { width: rect.width, height: rect.height };
+  }
+  return {
+    width: normalizePanelWidth(state.shell?.panelWidth),
+    height: normalizePanelHeight(state.shell?.panelHeight)
+  };
+}
+
+function fitCoveragePreviewToActualSurface() {
+  if (!coveragePreview || !cropperStage) return;
+  const surface = actualBackgroundSurfaceSize();
+  const stageRect = cropperStage.getBoundingClientRect();
+  if (!surface.width || !surface.height || !stageRect.width || !stageRect.height) return;
+
+  const maxWidth = Math.max(1, stageRect.width - 24);
+  const maxHeight = Math.max(1, stageRect.height - 24);
+  const scale = Math.min(maxWidth / surface.width, maxHeight / surface.height);
+  if (!Number.isFinite(scale) || scale <= 0) return;
+
+  coveragePreview.style.width = `${Math.max(1, Math.round(surface.width * scale))}px`;
+  coveragePreview.style.height = `${Math.max(1, Math.round(surface.height * scale))}px`;
+}
+
+function resetCoveragePreviewLayout(forceFull = false) {
+  fitCoveragePreviewToActualSurface();
+  resetCoverageBox(forceFull);
+}
+
 function backgroundPlacementFromMemo(memo) {
   const coverage = normalizeBackgroundCoverage(memo?.backgroundCoverage);
   return {
@@ -4001,7 +4342,7 @@ function boxFromBackgroundPlacement(placement, stage) {
 function clampCoverageBox(box) {
   const stage = cropperStageSize();
   if (!stage) return box;
-  const minHeight = Math.min(stage.height, Math.max(48, stage.height * 0.12));
+  const minHeight = Math.min(stage.height, Math.max(24, stage.height * 0.04));
   const height = clamp(box.height, minHeight, stage.height);
   const top = clamp(box.top, 0, stage.height - height);
   return { top, height };
@@ -4083,10 +4424,10 @@ function beginCoveragePlacement(dataUrl, crop) {
   coveragePreview?.querySelector(".coverage-preview-title") &&
     (coveragePreview.querySelector(".coverage-preview-title").textContent = memo?.title || "메모");
   setCropperMode("coverage");
-  coverageImage.onload = () => requestAnimationFrame(() => resetCoverageBox());
+  coverageImage.onload = () => requestAnimationFrame(() => resetCoveragePreviewLayout());
   coverageImage.removeAttribute("src");
   coverageImage.src = dataUrl;
-  requestAnimationFrame(() => resetCoverageBox());
+  requestAnimationFrame(() => resetCoveragePreviewLayout());
 }
 
 function openBackgroundCropper(sourceUrl, memoId, crop = null, isExisting = false) {
@@ -4131,6 +4472,10 @@ function closeBackgroundCropper() {
   cropperStage?.style.removeProperty("--coverage-preview-bg");
   cropperBox?.classList.remove("hidden");
   coveragePreview?.classList.add("hidden");
+  if (coveragePreview) {
+    coveragePreview.style.width = "";
+    coveragePreview.style.height = "";
+  }
   coverageBox?.classList.add("hidden");
   coverageBox?.classList.remove("image-move-mode");
   cropperClearBackgroundButton?.classList.add("hidden");
@@ -4142,7 +4487,7 @@ function handleCropperWindowResize() {
   if (!backgroundCropperState) return;
   if (backgroundCropperState.mode === "coverage") {
     backgroundCropperState.initialPlacement = coverageCurrentPlacement();
-    requestAnimationFrame(() => resetCoverageBox());
+    requestAnimationFrame(() => resetCoveragePreviewLayout());
     return;
   }
   backgroundCropperState.initialCrop = cropperCurrentCrop() || backgroundCropperState.initialCrop;
@@ -4627,40 +4972,40 @@ document.querySelectorAll(".tool-button").forEach((button) => {
 });
 
 editor.addEventListener("input", () => {
-  const snapshot = persistEditor();
-  queueEditorHistory(snapshot);
+  markEditorDirty();
+  queueEditorHistory();
   rememberEditorSelection();
-  updateToolbarCommandState();
-  updateTableTools();
+  scheduleToolbarRefresh();
+  scheduleTableToolsRefresh();
 });
 editor.addEventListener("keydown", handleEditorKeydown);
 editor.addEventListener("pointerdown", beginTableCellSelection);
 editor.addEventListener("keyup", () => {
   rememberEditorSelection();
-  updateToolbarCommandState();
-  updateTableTools();
+  scheduleToolbarRefresh();
+  scheduleTableToolsRefresh();
 });
 editor.addEventListener("mouseup", () => {
   rememberEditorSelection();
-  updateToolbarCommandState();
-  updateTableTools();
+  scheduleToolbarRefresh();
+  scheduleTableToolsRefresh();
 });
 editor.addEventListener("focus", () => {
   rememberEditorSelection();
-  updateToolbarCommandState();
-  updateTableTools();
+  scheduleToolbarRefresh();
+  scheduleTableToolsRefresh();
 });
 editor.addEventListener("click", (event) => {
   if (event.target.closest(".check-box")) {
     event.preventDefault();
     toggleChecklistItem(event.target);
   }
-  updateTableTools();
+  scheduleTableToolsRefresh();
 });
 document.addEventListener("selectionchange", () => {
-  updateToolbarCommandState();
+  scheduleToolbarRefresh();
   if (document.activeElement === editor || editor.contains(document.activeElement)) {
-    updateTableTools();
+    scheduleTableToolsRefresh();
   }
 });
 document.addEventListener("pointermove", moveTableCellSelection);
@@ -4722,7 +5067,6 @@ memoSearchInput?.addEventListener("keydown", (event) => {
     }
   }
 });
-addIndexButton.addEventListener("click", addIndex);
 addSettingsIndexButton.addEventListener("click", addIndex);
 importFontButton?.addEventListener("click", importFontForApp);
 [commonFontFamilySelect, defaultFontFamilySelect].forEach((select) => {
@@ -4752,7 +5096,7 @@ cropperResetButton?.addEventListener("click", () => {
     backgroundCropperState.imagePositionY = 0.5;
     backgroundCropperState.imageMoveMode = false;
     updateCoverageModeTitle();
-    resetCoverageBox(true);
+    resetCoveragePreviewLayout(true);
     return;
   }
   backgroundCropperState.initialCrop = { x: 0, y: 0, width: 1, height: 1 };
@@ -4828,7 +5172,9 @@ splitTableCellButton?.addEventListener("click", splitTableCell);
 tableBorderColorInput?.addEventListener("input", applyTableBorder);
 tableBorderWidthInput?.addEventListener("input", applyTableBorder);
 tableCellColorInput?.addEventListener("input", applyTableCellColor);
-tableFillColorInput?.addEventListener("input", applyTableFillColor);
+tableCellColorButtons.forEach((button) => {
+  button.addEventListener("click", () => applyTableCellColorValue(button.dataset.tableCellColor));
+});
 clearTableCellColorButton?.addEventListener("click", clearTableCellColor);
 deleteTableButton?.addEventListener("click", deleteTable);
 textColorInput?.closest(".toolbar-color-field")?.addEventListener("mousedown", (event) => {

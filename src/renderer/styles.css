@@ -836,6 +836,19 @@ button:not(:disabled):not(.edge-handle):active {
   background: color-mix(in srgb, var(--accent) 14%, rgba(255, 255, 255, 0.66));
 }
 
+.table-tool-icon {
+  width: 15px;
+  height: 15px;
+  display: inline-block;
+  border: 1.6px solid currentColor;
+  border-radius: 2px;
+  background:
+    linear-gradient(currentColor, currentColor) 33.333% 0 / 1.4px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) 66.666% 0 / 1.4px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) 0 33.333% / 100% 1.4px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 66.666% / 100% 1.4px no-repeat;
+}
+
 .toolbar-select,
 .toolbar-size-select,
 .toolbar-line-select {
@@ -954,15 +967,8 @@ input.toolbar-line-select {
 .app-shell.toolbar-collapsed .toolbar,
 .app-shell.toolbar-collapsed .text-color-palette,
 .app-shell.toolbar-collapsed .table-picker,
-.app-shell.toolbar-collapsed .table-tools {
-  display: none;
-}
-
+.app-shell.toolbar-collapsed .table-tools,
 .app-shell.toolbar-collapsed .panel-footer {
-  min-height: 48px;
-}
-
-.app-shell.toolbar-collapsed .footer-control-stack {
   display: none;
 }
 
@@ -1016,21 +1022,39 @@ input.toolbar-line-select {
 .all-memo-item {
   min-height: 34px;
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid rgba(34, 42, 64, 0.12);
   border-radius: var(--radius-control);
-  padding: 6px 8px;
+  padding: 5px;
   background: rgba(255, 255, 255, 0.54);
   color: var(--note-text);
-  cursor: pointer;
-  text-align: left;
 }
 
 .all-memo-item.active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, #ffffff);
+}
+
+.all-memo-open {
+  min-width: 0;
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--radius-compact);
+  padding: 3px;
+  background: transparent;
+  color: var(--note-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.all-memo-open:hover {
+  background: rgba(255, 255, 255, 0.46);
 }
 
 .all-memo-color {
@@ -1050,11 +1074,41 @@ input.toolbar-line-select {
   white-space: nowrap;
 }
 
-.all-memo-status {
+.all-memo-floating-toggle {
+  min-width: 48px;
+  height: 26px;
+  border: 1px solid rgba(34, 42, 64, 0.14);
+  border-radius: var(--radius-compact);
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.62);
   color: var(--muted);
+  cursor: pointer;
   font-size: 10px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.all-memo-floating-toggle.floating {
+  border-color: color-mix(in srgb, var(--accent) 42%, rgba(34, 42, 64, 0.14));
+  background: color-mix(in srgb, var(--accent) 16%, rgba(255, 255, 255, 0.72));
+  color: var(--note-text);
+}
+
+.all-memo-floating-toggle:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.all-memo-list-status {
+  margin: 2px 0 0;
+  color: #c23535;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.all-memo-list-status:empty {
+  display: none;
 }
 
 .memo-search-field {
@@ -1210,12 +1264,27 @@ input.toolbar-line-select {
 
 .table-tools {
   flex-wrap: wrap;
+  align-items: stretch;
 }
 
-.table-tools > span {
+.table-tool-group {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-right: 2px;
+}
+
+.table-tool-label,
+.table-cell-color-field > span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.table-style-group {
+  flex: 1 1 310px;
 }
 
 .table-style-field {
@@ -1226,6 +1295,54 @@ input.toolbar-line-select {
   color: var(--note-text);
   font-size: 11px;
   font-weight: 800;
+}
+
+.table-cell-color-field {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--note-text);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.table-cell-color-swatches {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.table-cell-color-swatch,
+.table-cell-color-custom {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid rgba(34, 42, 64, 0.2);
+  border-radius: 999px;
+  background: var(--swatch-color, #ffffff);
+  color: var(--note-text);
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.table-cell-color-custom {
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.table-cell-color-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .table-style-field input[type="color"] {
@@ -1248,6 +1365,10 @@ input.toolbar-line-select {
   color: var(--note-text);
   font-size: 12px;
   font-weight: 800;
+}
+
+.table-tools > .danger {
+  margin-left: auto;
 }
 
 .table-picker label {
@@ -1357,18 +1478,16 @@ input.toolbar-line-select {
 }
 
 .panel-footer {
-  min-height: 78px;
+  min-height: 58px;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   border-top: 1px solid var(--line);
 }
 
 .footer-control-stack {
   min-width: 0;
-  flex: 1 1 auto;
+  width: 100%;
   display: grid;
   gap: 4px;
 }
@@ -1906,9 +2025,8 @@ input.toolbar-line-select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(34, 42, 64, 0.25);
-  border-radius: var(--radius-compact);
-  background: rgba(255, 255, 255, 0.5);
+  border: 0;
+  background: transparent;
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
@@ -2106,7 +2224,9 @@ input.toolbar-line-select {
   position: relative;
   width: min(390px, 100%);
   height: min(100%, 520px);
-  min-height: 300px;
+  min-height: 0;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2206,6 +2326,11 @@ input.toolbar-line-select {
 
 .coverage-preview-toolbar .coverage-preview-select {
   justify-content: flex-start;
+}
+
+.coverage-preview-toolbar .table-tool-icon {
+  width: 13px;
+  height: 13px;
 }
 
 .coverage-preview-editor {

@@ -26,7 +26,9 @@
           <button class="tool-button" type="button" data-command="underline" title="밑줄"><u>U</u></button>
           <button id="bulletButton" class="tool-button" type="button" title="목록">•</button>
           <button id="checkButton" class="tool-button" type="button" title="체크">☐</button>
-          <button id="tableButton" class="tool-button" type="button" title="표 삽입">표</button>
+          <button id="tableButton" class="tool-button" type="button" title="표 삽입" aria-label="표 삽입">
+            <span class="table-tool-icon" aria-hidden="true"></span>
+          </button>
           <label class="toolbar-color-field" title="글씨 색">
             <span>A</span>
             <input id="textColorInput" type="color" value="#283044" aria-label="글씨 색" />
@@ -50,30 +52,44 @@
         <button id="cancelTableButton" class="small-button" type="button">닫기</button>
       </div>
       <div id="tableTools" class="table-tools hidden" aria-label="표 편집">
-        <span>표 편집</span>
-        <button id="addTableRowButton" class="small-button" type="button">행 추가</button>
-        <button id="addTableColButton" class="small-button" type="button">열 추가</button>
-        <button id="deleteTableRowButton" class="small-button" type="button">행 삭제</button>
-        <button id="deleteTableColButton" class="small-button" type="button">열 삭제</button>
-        <button id="mergeTableCellsButton" class="small-button" type="button">셀 병합</button>
-        <button id="splitTableCellButton" class="small-button" type="button">셀 분할</button>
-        <label class="table-style-field">
-          <span>테두리</span>
-          <input id="tableBorderColorInput" type="color" value="#6b7280" />
-        </label>
-        <label class="table-style-field compact">
-          <span>굵기</span>
-          <input id="tableBorderWidthInput" type="number" min="0" max="8" step="1" value="1" />
-        </label>
-        <label class="table-style-field">
-          <span>셀 색</span>
-          <input id="tableCellColorInput" type="color" value="#ffffff" />
-        </label>
-        <label class="table-style-field">
-          <span>표 색</span>
-          <input id="tableFillColorInput" type="color" value="#ffffff" />
-        </label>
-        <button id="clearTableCellColorButton" class="small-button" type="button">색 지움</button>
+        <div class="table-tool-group">
+          <span class="table-tool-label">행/열</span>
+          <button id="addTableRowButton" class="small-button" type="button">행 추가</button>
+          <button id="deleteTableRowButton" class="small-button" type="button">행 삭제</button>
+          <button id="addTableColButton" class="small-button" type="button">열 추가</button>
+          <button id="deleteTableColButton" class="small-button" type="button">열 삭제</button>
+        </div>
+        <div class="table-tool-group">
+          <span class="table-tool-label">셀</span>
+          <button id="mergeTableCellsButton" class="small-button" type="button">병합</button>
+          <button id="splitTableCellButton" class="small-button" type="button">분할</button>
+          <button id="clearTableCellColorButton" class="small-button" type="button">색 지움</button>
+        </div>
+        <div class="table-tool-group table-style-group">
+          <label class="table-style-field">
+            <span>테두리</span>
+            <input id="tableBorderColorInput" type="color" value="#6b7280" />
+          </label>
+          <label class="table-style-field compact">
+            <span>굵기</span>
+            <input id="tableBorderWidthInput" type="number" min="0" max="8" step="1" value="1" />
+          </label>
+          <div class="table-cell-color-field" aria-label="셀 색">
+            <span>셀 색</span>
+            <div class="table-cell-color-swatches">
+              <button class="table-cell-color-swatch" type="button" data-table-cell-color="#ffffff" style="--swatch-color: #ffffff" title="흰색" aria-label="셀 색 흰색"></button>
+              <button class="table-cell-color-swatch" type="button" data-table-cell-color="#fff4b8" style="--swatch-color: #fff4b8" title="노랑" aria-label="셀 색 노랑"></button>
+              <button class="table-cell-color-swatch" type="button" data-table-cell-color="#ffd9e8" style="--swatch-color: #ffd9e8" title="분홍" aria-label="셀 색 분홍"></button>
+              <button class="table-cell-color-swatch" type="button" data-table-cell-color="#ddeaff" style="--swatch-color: #ddeaff" title="파랑" aria-label="셀 색 파랑"></button>
+              <button class="table-cell-color-swatch" type="button" data-table-cell-color="#dcf5de" style="--swatch-color: #dcf5de" title="초록" aria-label="셀 색 초록"></button>
+              <button class="table-cell-color-swatch" type="button" data-table-cell-color="#f1f5f9" style="--swatch-color: #f1f5f9" title="회색" aria-label="셀 색 회색"></button>
+              <label class="table-cell-color-custom" title="직접 선택" aria-label="셀 색 직접 선택">
+                <span>+</span>
+                <input id="tableCellColorInput" type="color" value="#ffffff" />
+              </label>
+            </div>
+          </div>
+        </div>
         <button id="deleteTableButton" class="small-button danger" type="button">표 삭제</button>
       </div>
       <footer class="detached-footer">
@@ -108,7 +124,7 @@
                 <span>↷</span>
                 <span>B</span>
                 <span>A</span>
-                <span>표</span>
+                <span aria-hidden="true"><i class="table-tool-icon"></i></span>
               </div>
               <div class="coverage-preview-editor"></div>
               <div class="coverage-preview-footer">

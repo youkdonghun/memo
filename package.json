@@ -1,6 +1,6 @@
 {
   "name": "memo-bom",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "업무의 효율화와 기본 스티커메모의 한계를 극복하기 위한 데스크톱 메모 앱입니다.",
   "main": "src/main.cjs",
   "homepage": "https://blog.naver.com/sap_y",
