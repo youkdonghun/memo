@@ -2774,7 +2774,6 @@ function renderEmojiPalette() {
     });
     button.addEventListener("click", () => {
       insertCustomEmojiImage(emoji);
-      setEmojiPaletteOpen(false);
     });
     emojiPalette.appendChild(button);
   });
@@ -2792,7 +2791,6 @@ function renderEmojiPalette() {
     });
     button.addEventListener("click", () => {
       insertEmoji(emoji);
-      setEmojiPaletteOpen(false);
     });
     emojiPalette.appendChild(button);
   });
@@ -2867,9 +2865,13 @@ function handleEmojiShortcut(event) {
 }
 
 async function openEmojiFromShortcut() {
+  if (emojiPalette && !emojiPalette.classList.contains("hidden")) {
+    setEmojiPaletteOpen(false);
+    return;
+  }
   if (appShell.classList.contains("settings-open")) closeSettings();
   await setExpanded(true);
-  focusEditorAtEnd();
+  if (!restoreEditorSelection()) focusEditorAtEnd();
   setEmojiPaletteOpen(true);
 }
 
@@ -3361,6 +3363,14 @@ function tableCells(table) {
 }
 
 function stripTransientTableSelection(root) {
+  if (root.matches?.(".memo-table.table-selected")) {
+    root.classList.remove("table-selected");
+    if (!root.getAttribute("class")) root.removeAttribute("class");
+  }
+  if (root.matches?.(".memo-table-cell-selected, .memo-table-cell-active")) {
+    root.classList.remove("memo-table-cell-selected", "memo-table-cell-active");
+    if (!root.getAttribute("class")) root.removeAttribute("class");
+  }
   root.querySelectorAll(".memo-table.table-selected").forEach((table) => {
     table.classList.remove("table-selected");
     if (!table.getAttribute("class")) table.removeAttribute("class");
@@ -3420,6 +3430,53 @@ function selectedTableCells() {
   if (nativeCells.length) return nativeCells;
   const cell = currentTableCell();
   return cell ? [cell] : [];
+}
+
+function selectedTableClipboardPayload() {
+  const table = tableSelectionState?.table;
+  const cells = activeTableSelectionCells();
+  if (!table || !cells.length || !editor.contains(table)) return null;
+
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  if (cells.length <= 1 && selectionBelongsToEditor(range) && !range.collapsed) return null;
+
+  const selectedSet = new Set(cells);
+  const originalCells = tableCells(table);
+  const allSelected = originalCells.length > 0 && cells.length === originalCells.length;
+  const clone = table.cloneNode(true);
+  stripTransientTableSelection(clone);
+
+  if (!allSelected) {
+    const clonedCells = Array.from(clone.querySelectorAll("td"));
+    clonedCells.forEach((cell, index) => {
+      if (!selectedSet.has(originalCells[index])) cell.remove();
+    });
+    clone.querySelectorAll("tr").forEach((row) => {
+      if (!row.children.length) row.remove();
+    });
+  }
+
+  const rows = Array.from(clone.querySelectorAll("tr"));
+  if (!rows.length) return null;
+  const text = rows
+    .map((row) =>
+      Array.from(row.children)
+        .map((cell) =>
+          String(cell.textContent || "")
+            .replaceAll(CHECK_TEXT_PLACEHOLDER, "")
+            .replace(/\u00a0/g, " ")
+            .replace(/[ \t]*\n[ \t]*/g, "\n")
+            .trim()
+        )
+        .join("\t")
+    )
+    .join("\n");
+
+  return {
+    html: clone.outerHTML,
+    text
+  };
 }
 
 function targetTableCells() {
@@ -5195,6 +5252,14 @@ async function handleEditorPaste(event) {
   }
 }
 
+function handleEditorCopy(event) {
+  const payload = selectedTableClipboardPayload();
+  if (!payload || !event.clipboardData) return;
+  event.preventDefault();
+  event.clipboardData.setData("text/html", payload.html);
+  event.clipboardData.setData("text/plain", payload.text);
+}
+
 async function importFontForApp() {
   const result = await window.memoEdge.importFontFile?.();
   if (result?.canceled) return;
@@ -5545,14 +5610,6 @@ document.addEventListener("pointerdown", (event) => {
     setTextColorPaletteOpen(false);
   }
   if (
-    emojiPalette &&
-    !emojiPalette.classList.contains("hidden") &&
-    !emojiPalette.contains(target) &&
-    !emojiButton?.contains(target)
-  ) {
-    setEmojiPaletteOpen(false);
-  }
-  if (
     editor.contains(target) ||
     tableTools?.contains(target) ||
     tablePicker?.contains(target) ||
@@ -5634,6 +5691,7 @@ softBackgroundInput?.addEventListener("change", () => {
     resetCoveragePreviewLayout(true);
   }
 });
+document.addEventListener("copy", handleEditorCopy);
 document.addEventListener("paste", handleEditorPaste);
 window.addEventListener("resize", handleCropperWindowResize);
 lengthSelect.addEventListener("change", syncPanelSizeFields);
