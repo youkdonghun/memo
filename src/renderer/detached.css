@@ -2,6 +2,7 @@
   --note-bg: #fff4b8;
   --note-text: #283044;
   --accent: #3d6cff;
+  --memo-text: #283044;
   --memo-font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --memo-font-size: 15px;
   --memo-line-height: 1.5;
@@ -577,6 +578,7 @@ input.toolbar-line-select {
   font-family: var(--memo-font-family);
   font-size: var(--memo-font-size);
   line-height: var(--memo-line-height);
+  color: var(--memo-text);
   word-break: break-word;
 }
 
