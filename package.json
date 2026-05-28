@@ -10,7 +10,10 @@
     "start": "electron .",
     "dev": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "npm run dist:win",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac pkg --universal",
+    "dist:all": "electron-builder --win nsis --mac pkg --universal"
   },
   "build": {
     "appId": "com.youk.memobom",
@@ -19,6 +22,7 @@
     "files": [
       "src/**/*",
       "build/**/*",
+      "!build/icon.icns",
       "package.json"
     ],
     "extraResources": [
@@ -31,6 +35,30 @@
       "target": "nsis",
       "icon": "build/icon.ico",
       "legalTrademarks": "sap-scriptorium"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "pkg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "identity": null,
+      "artifactName": "MEMO BOM Setup ${version}-${arch}.${ext}",
+      "category": "public.app-category.productivity",
+      "extraResources": [
+        {
+          "from": "build/icon.png",
+          "to": "build/icon.png"
+        },
+        {
+          "from": "build/icon.icns",
+          "to": "build/icon.icns"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

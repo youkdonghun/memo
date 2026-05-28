@@ -184,11 +184,14 @@ function ensureDefaultDisplayTarget() {
 }
 
 function resolveIconPath() {
-  const candidates = [
-    path.join(process.resourcesPath || "", "build", "icon.ico"),
-    path.join(__dirname, "..", "build", "icon.ico"),
-    path.join(__dirname, "..", "..", "build", "icon.ico")
+  const iconNames =
+    process.platform === "darwin" ? ["icon.png", "icon.icns", "icon.ico"] : ["icon.ico", "icon.png"];
+  const roots = [
+    path.join(process.resourcesPath || "", "build"),
+    path.join(__dirname, "..", "build"),
+    path.join(__dirname, "..", "..", "build")
   ];
+  const candidates = roots.flatMap((root) => iconNames.map((iconName) => path.join(root, iconName)));
 
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
 }
@@ -197,7 +200,13 @@ function createIconImage() {
   const iconPath = resolveIconPath();
   if (!iconPath) return nativeImage.createEmpty();
   const image = nativeImage.createFromPath(iconPath);
-  return image.isEmpty() ? nativeImage.createEmpty() : image;
+  if (image.isEmpty()) return nativeImage.createEmpty();
+  if (process.platform === "darwin") {
+    const trayImage = image.resize({ width: 18, height: 18 });
+    trayImage.setTemplateImage(false);
+    return trayImage;
+  }
+  return image;
 }
 
 function sanitizeFontName(name) {
@@ -499,7 +508,7 @@ function applyWindowVisibility() {
     mainWindow.hide();
     return;
   }
-  if (!mainWindow.isVisible()) mainWindow.showInactive();
+  showMainWindowWithoutActivation();
 }
 
 function displayInfos() {
@@ -519,9 +528,15 @@ function applyWindowZOrder() {
 
 function bringMainWindowToFront() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (!mainWindow.isVisible()) mainWindow.showInactive();
+  showMainWindowWithoutActivation();
   if (typeof mainWindow.moveTop === "function") mainWindow.moveTop();
   if (shortcutTopmostActive) mainWindow.focus();
+}
+
+function showMainWindowWithoutActivation() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return;
+  if (process.platform === "darwin") mainWindow.show();
+  else mainWindow.showInactive();
 }
 
 function loginItemOptions() {
@@ -585,7 +600,7 @@ function showWindow(options = {}) {
     return;
   }
   applyWindowZOrder();
-  mainWindow.showInactive();
+  showMainWindowWithoutActivation();
   refreshWindowBounds(true);
   applyWindowVisibility();
   if (options.forceTopmost) bringMainWindowToFront();
