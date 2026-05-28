@@ -1700,7 +1700,7 @@ function endRailPositionDrag(event) {
 async function detachMemoToWindow(id) {
   const memo = state.indexes.find((item) => item.id === id);
   if (!memo || !window.memoEdge.detachMemo) return;
-  if (memo.id === state.activeId) persistEditor();
+  if (memo.id === state.activeId) flushEditorToMemo();
 
   const floatingIndex = state.floatingIds.indexOf(id);
   const wasFloating = floatingIndex >= 0;

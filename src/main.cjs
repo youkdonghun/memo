@@ -634,6 +634,24 @@ function attachDetachedMemo(id) {
   }
 }
 
+function buildDetachedWindowMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: "편집",
+      submenu: [
+        { label: "실행 취소", role: "undo", accelerator: "Ctrl+Z" },
+        { label: "다시 실행", role: "redo", accelerator: "Ctrl+Y" },
+        { type: "separator" },
+        { label: "잘라내기", role: "cut", accelerator: "Ctrl+X" },
+        { label: "복사", role: "copy", accelerator: "Ctrl+C" },
+        { label: "붙여넣기", role: "paste", accelerator: "Ctrl+V" },
+        { type: "separator" },
+        { label: "전체 선택", role: "selectAll", accelerator: "Ctrl+A" }
+      ]
+    }
+  ]);
+}
+
 function createDetachedMemoWindow(memoPayload) {
   const memo = normalizeDetachedMemo(memoPayload);
   detachedMemos.set(memo.id, memo);
@@ -662,6 +680,7 @@ function createDetachedMemoWindow(memoPayload) {
   });
 
   detachedWindow.__memoId = memo.id;
+  detachedWindow.setMenu(buildDetachedWindowMenu());
   detachedWindows.set(memo.id, detachedWindow);
   detachedWindow.loadFile(path.join(__dirname, "renderer", "detached.html"));
 
@@ -755,7 +774,7 @@ function showBackgroundStartupNotification() {
   startupNotificationShown = true;
 
   const title = "MEMO BOM";
-  const body = "백그라운드에서 실행 중입니다. 트레이 아이콘을 눌러 메모를 열 수 있습니다.";
+  const body = "백그라운드에서 실행 중입니다.\n트레이의 아이콘으로 메모를 사용하세요.";
   const iconPath = resolveIconPath();
 
   try {

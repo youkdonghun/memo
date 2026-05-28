@@ -72,6 +72,7 @@ let tableToolsRefreshFrame = null;
 let lastRenderedTableSelection = { table: null, cells: new Set(), activeCell: null };
 let recentTextColors = loadRecentTextColors();
 let backgroundCropperState = null;
+let attachingDetachedMemo = false;
 
 const titleInput = document.getElementById("detachedTitleInput");
 const editor = document.getElementById("detachedEditor");
@@ -2576,6 +2577,28 @@ function handleEditorKeydown(event) {
   if (!event.defaultPrevented) handleListKeydown(event);
 }
 
+async function attachDetachedMemoToMain() {
+  if (!memo?.id || attachingDetachedMemo) return;
+  attachingDetachedMemo = true;
+  try {
+    await saveNow();
+    await window.memoEdge.attachDetachedMemo(memo.id);
+  } finally {
+    attachingDetachedMemo = false;
+  }
+}
+
+function handleDetachedWindowShortcut(event) {
+  const key = String(event.key || "").toLowerCase();
+  const isEscape = key === "escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+  const isCtrlW = key === "w" && event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (!isEscape && !isCtrlW) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  attachDetachedMemoToMain();
+}
+
 document.querySelectorAll("[data-command]").forEach((button) => {
   button.addEventListener("click", () => execCommand(button.dataset.command));
 });
@@ -2627,6 +2650,7 @@ document.addEventListener("selectionchange", () => {
 document.addEventListener("pointermove", moveTableCellSelection);
 document.addEventListener("pointerup", endTableCellSelection);
 document.addEventListener("pointercancel", endTableCellSelection);
+document.addEventListener("keydown", handleDetachedWindowShortcut, true);
 document.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -2645,10 +2669,7 @@ document.addEventListener("pointerdown", (event) => {
   clearTableSelection();
 });
 titleInput.addEventListener("input", () => scheduleSave({ htmlDirty: false }));
-attachButton.addEventListener("click", async () => {
-  await saveNow();
-  await window.memoEdge.attachDetachedMemo(memo.id);
-});
+attachButton.addEventListener("click", attachDetachedMemoToMain);
 undoButton.addEventListener("click", undoEditor);
 redoButton.addEventListener("click", redoEditor);
 bulletButton.addEventListener("click", () => execCommand("insertUnorderedList"));
@@ -2756,6 +2777,9 @@ window.memoEdge.onDetachedMemoRefresh?.((nextMemo) => {
 });
 
 async function initialize() {
+  const result = await window.memoEdge.getDetachedMemo();
+  applyMemo(result?.memo || {});
+
   try {
     const payload = await window.memoEdge.listSystemFonts();
     if (payload?.ok && Array.isArray(payload.fonts) && payload.fonts.length) {
@@ -2768,12 +2792,12 @@ async function initialize() {
       ];
     }
     registerCustomFonts(payload?.customFonts || []);
+    syncToolbarTypography();
   } catch {
     systemFonts = [DEFAULT_FONT_FAMILY, "GulimChe", "Malgun Gothic", "Arial", "Calibri", "Consolas"];
     registerCustomFonts([]);
+    syncToolbarTypography();
   }
-  const result = await window.memoEdge.getDetachedMemo();
-  applyMemo(result?.memo || {});
 }
 
 initialize();

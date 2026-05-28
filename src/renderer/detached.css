@@ -154,7 +154,7 @@ button:not(:disabled):active {
   min-height: 28px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
@@ -227,17 +227,17 @@ button:not(:disabled):active {
   background: color-mix(in srgb, var(--accent) 14%, rgba(255, 255, 255, 0.66));
 }
 
-.table-tool-icon {
-  width: 15px;
-  height: 15px;
-  display: inline-block;
-  border: 1.6px solid currentColor;
-  border-radius: 2px;
-  background:
-    linear-gradient(currentColor, currentColor) 33.333% 0 / 1.4px 100% no-repeat,
-    linear-gradient(currentColor, currentColor) 66.666% 0 / 1.4px 100% no-repeat,
-    linear-gradient(currentColor, currentColor) 0 33.333% / 100% 1.4px no-repeat,
-    linear-gradient(currentColor, currentColor) 0 66.666% / 100% 1.4px no-repeat;
+.table-tool-icon,
+.background-tool-icon {
+  width: 17px;
+  height: 17px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .toolbar-select,
@@ -257,7 +257,7 @@ button:not(:disabled):active {
 }
 
 .toolbar-select {
-  flex: 1 1 160px;
+  flex: 1 1 142px;
 }
 
 .toolbar-size-select {
@@ -271,6 +271,57 @@ button:not(:disabled):active {
 input.toolbar-size-select,
 input.toolbar-line-select {
   padding: 0 6px;
+}
+
+.toolbar-number-field {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--note-text) 16%, transparent);
+  border-radius: var(--radius-compact);
+  padding: 0 7px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--note-text);
+  cursor: text;
+}
+
+.toolbar-number-field.size-field {
+  width: 78px;
+}
+
+.toolbar-number-field.line-field {
+  width: 80px;
+}
+
+.toolbar-number-field span {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--note-text) 62%, transparent);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.toolbar-number-field .toolbar-size-select,
+.toolbar-number-field .toolbar-line-select {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  height: auto;
+  flex: 1 1 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--note-text);
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+}
+
+.toolbar-number-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .toolbar-color-field {
