@@ -607,7 +607,7 @@ button:not(:disabled):not(.edge-handle):active {
 
 .panel-header {
   gap: 8px;
-  padding: 14px 14px 10px;
+  padding: 10px 12px 6px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -620,7 +620,7 @@ button:not(:disabled):not(.edge-handle):active {
     "all popup color spacer"
     "divider divider divider divider"
     "title title title title";
-  gap: 5px 8px;
+  gap: 3px 6px;
   align-items: start;
 }
 
@@ -642,7 +642,7 @@ button:not(:disabled):not(.edge-handle):active {
   min-width: 0;
   max-width: 245px;
   min-height: 26px;
-  margin-top: 4px;
+  margin-top: 1px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -668,7 +668,7 @@ button:not(:disabled):not(.edge-handle):active {
   min-width: 0;
   max-width: 245px;
   height: 28px;
-  margin-top: 4px;
+  margin-top: 1px;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   padding: 0 8px;
@@ -743,12 +743,12 @@ button:not(:disabled):not(.edge-handle):active {
 @media (max-width: 420px) {
   .panel-header {
     gap: 6px;
-    padding: 12px 10px 9px;
+    padding: 9px 10px 6px;
   }
 
   .title-block {
     grid-template-columns: auto auto auto minmax(0, 1fr);
-    gap: 4px 5px;
+    gap: 3px 5px;
   }
 
   .title-block::after {
@@ -835,8 +835,8 @@ button:not(:disabled):not(.edge-handle):active {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 4px;
+  padding: 5px 12px 7px;
   border-bottom: 1px solid var(--line);
 }
 
