@@ -38,7 +38,7 @@ jobs:
           if-no-files-found: error
 
   mac:
-    name: Mac pkg
+    name: Mac dmg
     runs-on: macos-latest
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -58,12 +58,12 @@ jobs:
       - name: Read version
         run: echo "VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
 
-      - name: Build Mac package
+      - name: Build Mac disk image
         run: npm run dist:mac
 
-      - name: Upload Mac package
+      - name: Upload Mac disk image
         uses: actions/upload-artifact@v4
         with:
           name: MEMO-BOM-Mac-${{ env.VERSION }}
-          path: dist/*.pkg
+          path: dist/*.dmg
           if-no-files-found: error
