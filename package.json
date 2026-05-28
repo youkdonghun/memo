@@ -11,9 +11,9 @@
     "dev": "electron .",
     "pack": "electron-builder --dir",
     "dist": "npm run dist:win",
-    "dist:win": "electron-builder --win nsis",
-    "dist:mac": "electron-builder --mac dmg --universal",
-    "dist:all": "electron-builder --win nsis --mac dmg --universal"
+    "dist:win": "electron-builder --win nsis --publish never",
+    "dist:mac": "electron-builder --mac dmg --universal --publish never",
+    "dist:all": "electron-builder --win nsis --mac dmg --universal --publish never"
   },
   "build": {
     "appId": "com.youk.memobom",
