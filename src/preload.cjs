@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("memoEdge", {
   listSystemFonts: () => ipcRenderer.invoke("fonts:list"),
   importFontFile: () => ipcRenderer.invoke("fonts:import"),
   importBackgroundImage: () => ipcRenderer.invoke("background:import"),
+  importEmojiImage: () => ipcRenderer.invoke("emoji:import-image"),
   saveBackgroundImage: (dataUrl) => ipcRenderer.invoke("background:save-cropped", dataUrl),
   getUserName: () => ipcRenderer.invoke("user:get-name"),
   detachMemo: (memo) => ipcRenderer.invoke("memo:detach", memo),
@@ -34,6 +35,9 @@ contextBridge.exposeInMainWorld("memoEdge", {
   },
   onOpenSettings: (callback) => {
     ipcRenderer.on("shell:open-settings", () => callback());
+  },
+  onOpenEmoji: (callback) => {
+    ipcRenderer.on("shortcut:open-emoji", () => callback());
   },
   onDetachedMemoUpdated: (callback) => {
     ipcRenderer.on("memo:detached-updated", (_, memo) => callback(memo));

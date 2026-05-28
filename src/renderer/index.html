@@ -19,11 +19,15 @@
             <input id="activeTitleInput" class="active-title-input hidden" type="text" maxlength="80" />
             <button id="allMemosButton" class="memo-list-button" type="button">전체 메모</button>
             <button id="activePopupButton" class="memo-list-button" type="button">팝업</button>
+            <button id="activeColorButton" class="memo-list-button memo-color-button" type="button" title="배경색 변경" aria-label="배경색 변경">
+              <span class="memo-color-dot" aria-hidden="true"></span>
+              <span>색상</span>
+            </button>
             <p id="activeSubtitle" class="active-subtitle"></p>
           </div>
           <div class="header-actions">
             <button id="toolbarToggleButton" class="icon-button" type="button" title="서식 도구">Aa</button>
-            <button id="deleteActiveMemoButton" class="icon-button danger" type="button" title="현재 메모 삭제">×</button>
+            <button id="topmostToggleButton" class="icon-button topmost-toggle-button active" type="button" title="항상 맨 앞에 표시" aria-label="항상 맨 앞에 표시" aria-pressed="true">앞</button>
             <button id="settingsButton" class="icon-button" type="button" title="설정">⚙</button>
             <button id="collapseButton" class="icon-button" type="button" title="접기">›</button>
           </div>
@@ -48,6 +52,7 @@
             <button class="tool-button" type="button" data-command="italic" title="기울임"><i>I</i></button>
             <button class="tool-button" type="button" data-command="underline" title="밑줄"><u>U</u></button>
             <button id="bulletButton" class="tool-button" type="button" title="목록">•</button>
+            <button id="orderedListButton" class="tool-button" type="button" title="번호 목록">1.</button>
             <button id="checkButton" class="tool-button" type="button" title="체크">☐</button>
             <button id="tableButton" class="tool-button" type="button" title="표 삽입" aria-label="표 삽입">
               <svg class="toolbar-svg table-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -66,10 +71,15 @@
                 <path d="M6.5 17l4.2-4.4 3.2 3.1 2.1-2.3 1.5 3.6"></path>
               </svg>
             </button>
+            <button id="emojiButton" class="tool-button" type="button" title="이모티콘 (Ctrl+Shift+E)" aria-label="이모티콘">
+              <span class="emoji-tool-icon" aria-hidden="true">☺</span>
+            </button>
           </div>
         </div>
 
+        <div id="memoColorPalette" class="memo-color-palette hidden" aria-label="배경색 선택"></div>
         <div id="textColorPalette" class="text-color-palette hidden" aria-label="Text color palette"></div>
+        <div id="emojiPalette" class="emoji-palette hidden" aria-label="이모티콘 선택"></div>
 
         <div id="memoListPanel" class="memo-list-panel hidden" aria-label="전체 메모 목록">
           <div class="memo-list-panel-header">
@@ -231,6 +241,11 @@
             <select id="displaySelect"></select>
           </label>
 
+          <label class="check-field">
+            <input id="alwaysOnTopInput" type="checkbox" checked />
+            <span>항상 맨 앞에 표시</span>
+          </label>
+
           <div class="window-placement-fields">
             <label class="field">
               <span>모니터 가장자리</span>
@@ -303,6 +318,11 @@
             <input id="findShortcutInput" class="shortcut-input" type="text" placeholder="CommandOrControl+F" readonly />
           </label>
 
+          <label class="field">
+            <span>이모티콘 열기</span>
+            <input id="emojiShortcutInput" class="shortcut-input" type="text" placeholder="CommandOrControl+Shift+E" readonly />
+          </label>
+
           <label class="check-field">
             <input id="startupInput" type="checkbox" checked />
             <span>컴퓨터를 켜면 자동 실행</span>
@@ -312,6 +332,15 @@
             <input id="startupGuideInput" type="checkbox" />
             <span>앱이 켜질 때 안내 표시</span>
           </label>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-heading-row">
+            <h3>이모티콘</h3>
+            <button id="importEmojiImageButton" class="small-button" type="button">사진 추가</button>
+          </div>
+          <div id="customEmojiList" class="custom-emoji-list"></div>
+          <p class="hint-text">추가한 사진은 이모티콘 버튼과 단축키 팔레트에서 사용할 수 있습니다.</p>
         </section>
 
         <section class="settings-section">
@@ -404,6 +433,10 @@
             </div>
           </div>
           <div class="cropper-actions">
+            <label class="soft-background-field">
+              <input id="softBackgroundInput" type="checkbox" />
+              <span>은은하게 넣기</span>
+            </label>
             <button id="cropperResetButton" class="small-button" type="button">전체</button>
             <button id="cropperClearBackgroundButton" class="small-button danger hidden" type="button">배경 지우기</button>
             <button id="cropperApplyButton" class="primary-button" type="button">등록</button>

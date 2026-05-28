@@ -7,6 +7,7 @@ const HANDLE_CLICK_DELAY_MS = 220;
 const DEFAULT_CYCLE_SHORTCUT = "CommandOrControl+Shift+D";
 const DEFAULT_HIDE_SHORTCUT = "CommandOrControl+Shift+F";
 const DEFAULT_FIND_SHORTCUT = "CommandOrControl+F";
+const DEFAULT_EMOJI_SHORTCUT = "CommandOrControl+Shift+E";
 const DEFAULT_FONT_SIZE = 15;
 const DEFAULT_COMMON_FONT_SIZE = 12;
 const DEFAULT_FONT_FAMILY = "Gulim";
@@ -29,9 +30,13 @@ const HISTORY_DEBOUNCE_MS = 650;
 const MAX_EDITOR_HISTORY_ENTRIES = 35;
 const MAX_EDITOR_HISTORY_BYTES = 1800000;
 const FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64, 72, 96];
+const MIN_FONT_SIZE = FONT_SIZE_OPTIONS[0];
+const MAX_FONT_SIZE = FONT_SIZE_OPTIONS[FONT_SIZE_OPTIONS.length - 1];
 const LINE_SPACING_OPTIONS = [0.8, 1, 1.15, 1.5, 2, 2.5, 3, 3.5, 4];
 const HANDLE_REORDER_THRESHOLD = 8;
 const MAX_RECENT_TEXT_COLORS = 6;
+const MAX_CUSTOM_EMOJI_IMAGES = 24;
+const SOFT_BACKGROUND_OPACITY = 0.62;
 const CARRIED_TYPING_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color"];
 const CARRIED_LIST_BLOCK_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color", "lineHeight"];
 const PERF_WARN_MS = 16;
@@ -47,6 +52,73 @@ const TEXT_COLOR_PRESETS = [
   "#8b5cf6",
   "#ec4899",
   "#ffffff"
+];
+const EMOJI_PRESETS = [
+  "😀",
+  "😄",
+  "😊",
+  "🙂",
+  "😂",
+  "🤣",
+  "😍",
+  "🥰",
+  "😎",
+  "🤔",
+  "😅",
+  "😢",
+  "😡",
+  "😴",
+  "😱",
+  "🙄",
+  "👍",
+  "👎",
+  "👏",
+  "🙏",
+  "💪",
+  "👌",
+  "🙌",
+  "🤝",
+  "✋",
+  "🔥",
+  "⭐",
+  "🌟",
+  "💯",
+  "✅",
+  "☑️",
+  "❌",
+  "⭕",
+  "⚠️",
+  "❗",
+  "❓",
+  "🔔",
+  "💡",
+  "📌",
+  "📎",
+  "📅",
+  "⏰",
+  "📝",
+  "📋",
+  "📊",
+  "📈",
+  "📉",
+  "💼",
+  "📁",
+  "🔍",
+  "🔒",
+  "🎯",
+  "🚀",
+  "🏁",
+  "🏆",
+  "🔁",
+  "⬆️",
+  "⬇️",
+  "➡️",
+  "⬅️",
+  "🎉",
+  "❤️",
+  "💙",
+  "☕",
+  "🍀"
 ];
 
 const FONT_LABELS = {
@@ -87,6 +159,8 @@ const defaultShellSettings = {
   cycleShortcut: DEFAULT_CYCLE_SHORTCUT,
   hideShortcut: DEFAULT_HIDE_SHORTCUT,
   findShortcut: DEFAULT_FIND_SHORTCUT,
+  emojiShortcut: DEFAULT_EMOJI_SHORTCUT,
+  alwaysOnTop: true,
   anchor: "middle",
   manualYOffset: 0,
   followCursorDisplay: false,
@@ -108,7 +182,8 @@ const defaultAppPrefs = {
   startupUserChoiceSet: false,
   welcomeMemoApplied: true,
   initialSingleMemoApplied: true,
-  recentTextColors: []
+  recentTextColors: [],
+  customEmojiImages: []
 };
 
 function createId() {
@@ -219,6 +294,8 @@ const activeLabel = document.getElementById("activeLabel");
 const activeSubtitle = document.getElementById("activeSubtitle");
 const allMemosButton = document.getElementById("allMemosButton");
 const activePopupButton = document.getElementById("activePopupButton");
+const activeColorButton = document.getElementById("activeColorButton");
+const memoColorPalette = document.getElementById("memoColorPalette");
 const memoListPanel = document.getElementById("memoListPanel");
 const closeMemoListButton = document.getElementById("closeMemoListButton");
 const allMemoList = document.getElementById("allMemoList");
@@ -234,12 +311,13 @@ const saveStatus = document.getElementById("saveStatus");
 const collapseButton = document.getElementById("collapseButton");
 const toolbarToggleButton = document.getElementById("toolbarToggleButton");
 const settingsButton = document.getElementById("settingsButton");
-const deleteActiveMemoButton = document.getElementById("deleteActiveMemoButton");
+const topmostToggleButton = document.getElementById("topmostToggleButton");
 const closeSettingsButton = document.getElementById("closeSettingsButton");
 const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
 const clearButton = document.getElementById("clearButton");
 const bulletButton = document.getElementById("bulletButton");
+const orderedListButton = document.getElementById("orderedListButton");
 const checkButton = document.getElementById("checkButton");
 const tableButton = document.getElementById("tableButton");
 const tablePicker = document.getElementById("tablePicker");
@@ -263,6 +341,8 @@ const clearTableCellColorButton = document.getElementById("clearTableCellColorBu
 const deleteTableButton = document.getElementById("deleteTableButton");
 const textColorInput = document.getElementById("textColorInput");
 const textColorPalette = document.getElementById("textColorPalette");
+const emojiButton = document.getElementById("emojiButton");
+const emojiPalette = document.getElementById("emojiPalette");
 const backgroundButton = document.getElementById("backgroundButton");
 const backgroundCropper = document.getElementById("backgroundCropper");
 const cropperTitle = document.getElementById("cropperTitle");
@@ -276,6 +356,7 @@ const cropperApplyButton = document.getElementById("cropperApplyButton");
 const cropperCancelButton = document.getElementById("cropperCancelButton");
 const cropperResetButton = document.getElementById("cropperResetButton");
 const cropperClearBackgroundButton = document.getElementById("cropperClearBackgroundButton");
+const softBackgroundInput = document.getElementById("softBackgroundInput");
 const fontSizeToolbarSelect = document.getElementById("fontSizeToolbarSelect");
 const fontFamilyToolbarSelect = document.getElementById("fontFamilyToolbarSelect");
 const lineSpacingToolbarSelect = document.getElementById("lineSpacingToolbarSelect");
@@ -296,6 +377,8 @@ const importFontButton = document.getElementById("importFontButton");
 const cycleShortcutInput = document.getElementById("cycleShortcutInput");
 const hideShortcutInput = document.getElementById("hideShortcutInput");
 const findShortcutInput = document.getElementById("findShortcutInput");
+const emojiShortcutInput = document.getElementById("emojiShortcutInput");
+const alwaysOnTopInput = document.getElementById("alwaysOnTopInput");
 const startupInput = document.getElementById("startupInput");
 const startupGuideInput = document.getElementById("startupGuideInput");
 const applySettingsButton = document.getElementById("applySettingsButton");
@@ -306,6 +389,8 @@ const floatingLimitText = document.getElementById("floatingLimitText");
 const exportDataButton = document.getElementById("exportDataButton");
 const importDataButton = document.getElementById("importDataButton");
 const resetSettingsButton = document.getElementById("resetSettingsButton");
+const importEmojiImageButton = document.getElementById("importEmojiImageButton");
+const customEmojiList = document.getElementById("customEmojiList");
 const footerOpacityInput = document.getElementById("footerOpacityInput");
 const footerOpacityValue = document.getElementById("footerOpacityValue");
 const launchGuide = document.getElementById("launchGuide");
@@ -449,7 +534,7 @@ function normalizeHexColor(value, fallback) {
 
 function normalizeFontSize(value) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? clamp(Math.round(numeric), 8, 96) : DEFAULT_FONT_SIZE;
+  return Number.isFinite(numeric) ? clamp(Math.round(numeric), MIN_FONT_SIZE, MAX_FONT_SIZE) : DEFAULT_FONT_SIZE;
 }
 
 function normalizeLineSpacing(value) {
@@ -578,6 +663,11 @@ function normalizeShellSettings(value = {}) {
       typeof value.findShortcut === "string" && value.findShortcut.trim()
         ? value.findShortcut.trim()
         : DEFAULT_FIND_SHORTCUT,
+    emojiShortcut:
+      typeof value.emojiShortcut === "string" && value.emojiShortcut.trim()
+        ? value.emojiShortcut.trim()
+        : DEFAULT_EMOJI_SHORTCUT,
+    alwaysOnTop: value.alwaysOnTop !== false,
     followCursorDisplay: value.followCursorDisplay === true,
     targetDisplayId: typeof value.targetDisplayId === "number" ? value.targetDisplayId : null
   };
@@ -602,6 +692,25 @@ function normalizeTextColorList(value) {
   ].slice(0, MAX_RECENT_TEXT_COLORS);
 }
 
+function normalizeCustomEmojiImages(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map((item) => {
+      const url = normalizeAssetUrl(item?.url);
+      if (!url || seen.has(url)) return null;
+      seen.add(url);
+      return {
+        id: typeof item?.id === "string" && item.id ? item.id : createId(),
+        name: typeof item?.name === "string" && item.name.trim() ? item.name.trim().slice(0, 40) : "이모티콘",
+        url,
+        createdAt: Number.isFinite(Number(item?.createdAt)) ? Number(item.createdAt) : Date.now()
+      };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_CUSTOM_EMOJI_IMAGES);
+}
+
 function normalizeAppPrefs(value = {}) {
   return {
     ...defaultAppPrefs,
@@ -614,7 +723,8 @@ function normalizeAppPrefs(value = {}) {
     startupUserChoiceSet: Boolean(value.startupUserChoiceSet),
     welcomeMemoApplied: true,
     initialSingleMemoApplied: true,
-    recentTextColors: normalizeTextColorList(value.recentTextColors)
+    recentTextColors: normalizeTextColorList(value.recentTextColors),
+    customEmojiImages: normalizeCustomEmojiImages(value.customEmojiImages)
   };
 }
 
@@ -686,6 +796,7 @@ function syncShellLayoutClasses() {
       : normalizePanelWidth(shell.panelWidth);
   document.documentElement.style.setProperty("--panel-width", `${panelWidth}px`);
   syncToolbarVisibility();
+  syncAlwaysOnTopControls();
 }
 
 function syncToolbarVisibility() {
@@ -696,6 +807,29 @@ function syncToolbarVisibility() {
     toolbarToggleButton.title = collapsed ? "서식 도구 보이기" : "서식 도구 숨기기";
     toolbarToggleButton.setAttribute("aria-pressed", String(!collapsed));
   }
+}
+
+function syncAlwaysOnTopControls() {
+  const enabled = state.shell?.alwaysOnTop !== false;
+  if (topmostToggleButton) {
+    topmostToggleButton.classList.toggle("active", enabled);
+    topmostToggleButton.textContent = enabled ? "앞" : "뒤";
+    const title = enabled ? "항상 맨 앞 해제" : "항상 맨 앞에 표시";
+    topmostToggleButton.title = title;
+    topmostToggleButton.setAttribute("aria-label", title);
+    topmostToggleButton.setAttribute("aria-pressed", String(enabled));
+  }
+  if (alwaysOnTopInput) alwaysOnTopInput.checked = enabled;
+}
+
+async function updateAlwaysOnTopSetting(enabled) {
+  state.shell = normalizeShellSettings({ ...state.shell, alwaysOnTop: Boolean(enabled) });
+  syncAlwaysOnTopControls();
+  const result = await window.memoEdge.updateSettings(state.shell);
+  state.shell = normalizeShellSettings({ ...state.shell, ...(result.settings || {}) });
+  syncAlwaysOnTopControls();
+  saveState();
+  if (appShell.classList.contains("settings-open")) setSettingsStatus("적용됨");
 }
 
 function isHorizontalDock() {
@@ -751,6 +885,25 @@ function populateFontSizeSelect(select, currentSize) {
     select.appendChild(option);
   });
   select.value = String(current);
+}
+
+function validEditableFontSize(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric < MIN_FONT_SIZE || numeric > MAX_FONT_SIZE) return null;
+  return normalizeFontSize(numeric);
+}
+
+function applyFontSizeControlValue(control, options = {}) {
+  if (!control) return;
+  const rawValue = String(control.value || "").trim();
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) return;
+
+  const size = options.force ? normalizeFontSize(numeric) : validEditableFontSize(numeric);
+  if (!size) return;
+  if (options.force) control.value = String(size);
+  applyInlineTextStyle("fontSize", `${size}px`);
 }
 
 function populateLineSpacingSelect(select, currentSpacing) {
@@ -1259,6 +1412,7 @@ function applyMemoTheme(memo) {
   document.documentElement.style.setProperty("--note-bg", color);
   document.documentElement.style.setProperty("--note-text", text);
   document.documentElement.style.setProperty("--accent", accentColor(color));
+  document.documentElement.style.setProperty("--active-memo-color", color);
   document.documentElement.style.setProperty("--memo-bg-image", backgroundImage ? `url("${backgroundImage.replace(/"/g, "%22")}")` : "none");
   document.documentElement.style.setProperty("--memo-bg-opacity", String(imageOpacity));
   document.documentElement.style.setProperty("--memo-bg-top", `${Math.round(top * 10000) / 100}%`);
@@ -2226,10 +2380,19 @@ function createTypingStyleAnchor(styles = {}) {
   return { span, textNode };
 }
 
-function insertTypingStyleAnchor(range, property, value) {
-  const { span, textNode } = createTypingStyleAnchor({ [property]: value });
-  range.insertNode(span);
+function selectionStartElement(range) {
+  const node = range?.startContainer;
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+}
 
+function typingStyleAnchorAtRange(range) {
+  const element = selectionStartElement(range);
+  const anchor = element?.closest?.(".typing-style-anchor");
+  return anchor && editor.contains(anchor) ? anchor : null;
+}
+
+function setRangeAtTextEnd(textNode) {
   const nextRange = document.createRange();
   nextRange.setStart(textNode, textNode.nodeValue.length);
   nextRange.collapse(true);
@@ -2237,6 +2400,83 @@ function insertTypingStyleAnchor(range, property, value) {
   selection.removeAllRanges();
   selection.addRange(nextRange);
   savedEditorRange = nextRange.cloneRange();
+}
+
+function insertTypingStyleAnchor(range, styles = {}) {
+  const existingAnchor = typingStyleAnchorAtRange(range);
+  if (existingAnchor) {
+    Object.entries(styles).forEach(([property, value]) => {
+      if (value) existingAnchor.style[property] = value;
+    });
+    const textNode = Array.from(existingAnchor.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
+    if (!textNode || !textNode.nodeValue) {
+      if (textNode) textNode.nodeValue = CHECK_TEXT_PLACEHOLDER;
+      setRangeAtTextEnd(textNode || existingAnchor.appendChild(document.createTextNode(CHECK_TEXT_PLACEHOLDER)));
+      return;
+    }
+    const nextRange = range.cloneRange();
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
+    savedEditorRange = nextRange.cloneRange();
+    return;
+  }
+
+  const { span, textNode } = createTypingStyleAnchor(styles);
+  range.insertNode(span);
+  setRangeAtTextEnd(textNode);
+}
+
+function rangeIntersectsNode(range, node) {
+  try {
+    return range.intersectsNode(node);
+  } catch {
+    return false;
+  }
+}
+
+function applyInlineObjectStyle(range, property, value) {
+  if (property !== "fontSize") return false;
+  const objects = Array.from(editor.querySelectorAll(".memo-custom-emoji")).filter((node) =>
+    rangeIntersectsNode(range, node)
+  );
+  objects.forEach((node) => {
+    node.style.fontSize = value;
+  });
+  return objects.length > 0;
+}
+
+function replaceElementWithStyledSpan(element, styles = {}) {
+  const span = document.createElement("span");
+  Object.entries(styles).forEach(([property, value]) => {
+    span.style[property] = value;
+  });
+  while (element.firstChild) span.appendChild(element.firstChild);
+  element.replaceWith(span);
+  return span;
+}
+
+function applyNativeFontSizeToSelection(value) {
+  const existingElements = new WeakSet(Array.from(editor.querySelectorAll("*")));
+  try {
+    document.execCommand("styleWithCSS", false, false);
+    document.execCommand("fontSize", false, "7");
+  } catch {
+    return false;
+  }
+
+  let converted = false;
+  editor.querySelectorAll("font[size='7']").forEach((font) => {
+    replaceElementWithStyledSpan(font, { fontSize: value });
+    converted = true;
+  });
+  editor.querySelectorAll("span[style]").forEach((span) => {
+    if (existingElements.has(span) || !span.style.fontSize) return;
+    span.style.fontSize = value;
+    converted = true;
+  });
+
+  return converted;
 }
 
 function wrapTextNodeSegment(node, startOffset, endOffset, property, value) {
@@ -2289,14 +2529,20 @@ function wrapRangeTextNodes(range, property, value) {
 
 function applyInlineTextStyle(property, value) {
   const returnFocusElement = document.activeElement;
-  restoreEditorSelection();
+  if (!restoreEditorSelection()) ensureEditorSelectionAtInsertionPoint();
   const range = currentEditorRange();
   if (!range) return;
+  let changed = false;
   if (range.collapsed) {
-    insertTypingStyleAnchor(range, property, value);
+    insertTypingStyleAnchor(range, { ...carriedTypingStylesFromRange(range), [property]: value });
+    changed = true;
   } else {
-    wrapRangeTextNodes(range.cloneRange(), property, value);
+    const fallbackRange = range.cloneRange();
+    changed = applyInlineObjectStyle(range, property, value);
+    changed = wrapRangeTextNodes(fallbackRange, property, value) || changed;
+    if (!changed && property === "fontSize") changed = applyNativeFontSizeToSelection(value);
   }
+  if (!changed) return;
   persistEditor();
   pushEditorHistory();
   updateToolbarCommandState();
@@ -2451,6 +2697,182 @@ function renderTextColorPalette() {
   textColorPalette.appendChild(customLabel);
 }
 
+function setMemoColorPaletteOpen(open) {
+  if (!memoColorPalette) return;
+  if (open) renderMemoColorPalette();
+  memoColorPalette.classList.toggle("hidden", !open);
+  activeColorButton?.classList.toggle("active", open);
+}
+
+function toggleMemoColorPalette() {
+  setMemoColorPaletteOpen(memoColorPalette?.classList.contains("hidden"));
+}
+
+function renderMemoColorPalette() {
+  if (!memoColorPalette) return;
+  const memo = activeMemo();
+  if (!memo) return;
+  const activeColor = normalizeHexColor(memo.color, COLOR_PRESETS[0]);
+  memoColorPalette.innerHTML = "";
+
+  COLOR_PRESETS.forEach((color) => {
+    const swatch = document.createElement("button");
+    swatch.type = "button";
+    swatch.className = "memo-color-swatch";
+    if (activeColor.toLowerCase() === color.toLowerCase()) swatch.classList.add("selected");
+    swatch.style.setProperty("--swatch-color", color);
+    swatch.title = color;
+    swatch.setAttribute("aria-label", color);
+    swatch.addEventListener("click", () => {
+      updateMemoColor(memo.id, color);
+      setMemoColorPaletteOpen(false);
+    });
+    memoColorPalette.appendChild(swatch);
+  });
+
+  const customLabel = document.createElement("label");
+  customLabel.className = "memo-color-custom";
+  customLabel.title = "직접 색상 선택";
+  const customText = document.createElement("span");
+  customText.textContent = "+";
+  const customInput = document.createElement("input");
+  customInput.type = "color";
+  customInput.value = activeColor;
+  customInput.addEventListener("input", () => updateMemoColor(memo.id, customInput.value));
+  customLabel.append(customText, customInput);
+  memoColorPalette.appendChild(customLabel);
+}
+
+function setEmojiPaletteOpen(open) {
+  if (!emojiPalette) return;
+  if (open) renderEmojiPalette();
+  emojiPalette.classList.toggle("hidden", !open);
+  emojiButton?.classList.toggle("active", open);
+}
+
+function toggleEmojiPalette() {
+  setEmojiPaletteOpen(emojiPalette?.classList.contains("hidden"));
+}
+
+function renderEmojiPalette() {
+  if (!emojiPalette) return;
+  emojiPalette.innerHTML = "";
+  const customEmojiImages = normalizeCustomEmojiImages(state.prefs?.customEmojiImages);
+  customEmojiImages.forEach((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "emoji-swatch custom-emoji-swatch";
+    button.title = emoji.name;
+    button.setAttribute("aria-label", emoji.name);
+    const image = document.createElement("img");
+    image.src = emoji.url;
+    image.alt = "";
+    button.appendChild(image);
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      rememberEditorSelection();
+    });
+    button.addEventListener("click", () => {
+      insertCustomEmojiImage(emoji);
+      setEmojiPaletteOpen(false);
+    });
+    emojiPalette.appendChild(button);
+  });
+
+  EMOJI_PRESETS.forEach((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "emoji-swatch";
+    button.textContent = emoji;
+    button.title = emoji;
+    button.setAttribute("aria-label", emoji);
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      rememberEditorSelection();
+    });
+    button.addEventListener("click", () => {
+      insertEmoji(emoji);
+      setEmojiPaletteOpen(false);
+    });
+    emojiPalette.appendChild(button);
+  });
+}
+
+function ensureEditorSelectionAtInsertionPoint() {
+  if (restoreEditorSelection()) return;
+  editor.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+}
+
+function insertEmoji(emoji) {
+  const value = String(emoji || "");
+  if (!value) return;
+  flushPendingEditorHistory();
+  ensureEditorSelectionAtInsertionPoint();
+  document.execCommand("insertText", false, value);
+  persistEditor();
+  pushEditorHistory();
+  rememberEditorSelection();
+  scheduleToolbarRefresh();
+}
+
+function createCustomEmojiElement(emoji, styles = {}) {
+  const image = document.createElement("img");
+  image.className = "memo-custom-emoji";
+  image.src = emoji.url;
+  image.alt = emoji.name || "emoji";
+  image.title = emoji.name || "";
+  if (styles.fontSize) image.style.fontSize = styles.fontSize;
+  return image;
+}
+
+function placeCaretAfterNode(node) {
+  const range = document.createRange();
+  range.setStartAfter(node);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+}
+
+function insertCustomEmojiImage(emoji) {
+  if (!emoji?.url) return;
+  flushPendingEditorHistory();
+  ensureEditorSelectionAtInsertionPoint();
+  const image = createCustomEmojiElement(emoji, carriedTypingStylesFromRange(currentEditorRange()));
+  insertNodeAtSelection(image);
+  placeCaretAfterNode(image);
+  persistEditor();
+  pushEditorHistory();
+  scheduleToolbarRefresh();
+}
+
+function handleEmojiShortcut(event) {
+  if (!shortcutMatchesEvent(event, state.shell?.emojiShortcut || DEFAULT_EMOJI_SHORTCUT)) return;
+
+  const target = event.target;
+  if (target instanceof Element && target.closest("input, textarea, select") && !editor.contains(target)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  rememberEditorSelection();
+  toggleEmojiPalette();
+}
+
+async function openEmojiFromShortcut() {
+  if (appShell.classList.contains("settings-open")) closeSettings();
+  await setExpanded(true);
+  focusEditorAtEnd();
+  setEmojiPaletteOpen(true);
+}
+
 function toggleToolbarVisibility() {
   state.prefs = normalizeAppPrefs({
     ...state.prefs,
@@ -2519,11 +2941,13 @@ function rememberEditorSelection() {
 }
 
 function restoreEditorSelection() {
-  editor.focus();
   if (!selectionBelongsToEditor(savedEditorRange)) return false;
+  const range = savedEditorRange.cloneRange();
+  editor.focus({ preventScroll: true });
   const selection = window.getSelection();
   selection.removeAllRanges();
-  selection.addRange(savedEditorRange);
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
   return true;
 }
 
@@ -3914,12 +4338,15 @@ async function fillSettingsForm() {
   cycleShortcutInput.value = state.shell.cycleShortcut || DEFAULT_CYCLE_SHORTCUT;
   hideShortcutInput.value = state.shell.hideShortcut || DEFAULT_HIDE_SHORTCUT;
   if (findShortcutInput) findShortcutInput.value = state.shell.findShortcut || DEFAULT_FIND_SHORTCUT;
+  if (emojiShortcutInput) emojiShortcutInput.value = state.shell.emojiShortcut || DEFAULT_EMOJI_SHORTCUT;
   cycleShortcutInput.dataset.previousValue = cycleShortcutInput.value;
   hideShortcutInput.dataset.previousValue = hideShortcutInput.value;
   if (findShortcutInput) findShortcutInput.dataset.previousValue = findShortcutInput.value;
+  if (emojiShortcutInput) emojiShortcutInput.dataset.previousValue = emojiShortcutInput.value;
   startupGuideInput.checked = state.prefs?.showLaunchGuideOnStartup !== false;
   await ensureStartupEnabled();
 
+  renderCustomEmojiSettings();
   renderIndexManager();
 }
 
@@ -4412,8 +4839,10 @@ function setCropperMode(mode) {
 function beginCoveragePlacement(dataUrl, crop) {
   if (!backgroundCropperState || !coverageImage) return;
   const memo = state.indexes.find((item) => item.id === backgroundCropperState.memoId);
+  const softBackground = Boolean(softBackgroundInput?.checked);
   backgroundCropperState.pendingDataUrl = dataUrl;
   backgroundCropperState.pendingCrop = crop;
+  backgroundCropperState.softBackground = softBackground;
   backgroundCropperState.initialPlacement = backgroundPlacementFromMemo(memo);
   backgroundCropperState.imagePositionX = backgroundCropperState.initialPlacement.positionX;
   backgroundCropperState.imagePositionY = backgroundCropperState.initialPlacement.positionY;
@@ -4424,10 +4853,10 @@ function beginCoveragePlacement(dataUrl, crop) {
   coveragePreview?.querySelector(".coverage-preview-title") &&
     (coveragePreview.querySelector(".coverage-preview-title").textContent = memo?.title || "메모");
   setCropperMode("coverage");
-  coverageImage.onload = () => requestAnimationFrame(() => resetCoveragePreviewLayout());
+  coverageImage.onload = () => requestAnimationFrame(() => resetCoveragePreviewLayout(softBackground));
   coverageImage.removeAttribute("src");
   coverageImage.src = dataUrl;
-  requestAnimationFrame(() => resetCoveragePreviewLayout());
+  requestAnimationFrame(() => resetCoveragePreviewLayout(softBackground));
 }
 
 function openBackgroundCropper(sourceUrl, memoId, crop = null, isExisting = false) {
@@ -4448,9 +4877,11 @@ function openBackgroundCropper(sourceUrl, memoId, crop = null, isExisting = fals
     imagePositionX: normalizeBackgroundPosition(memo?.backgroundPositionX),
     imagePositionY: normalizeBackgroundPosition(memo?.backgroundPositionY),
     imageMoveMode: false,
+    softBackground: false,
     drag: null
   };
   setCropperMode("crop");
+  if (softBackgroundInput) softBackgroundInput.checked = false;
   cropperClearBackgroundButton?.classList.toggle("hidden", !backgroundCropperState.isExisting);
   cropperApplyButton.disabled = false;
   cropperImage.onload = () => requestAnimationFrame(() => resetCropBox());
@@ -4661,6 +5092,7 @@ async function applyBackgroundPlacement() {
   const crop = backgroundCropperState.pendingCrop || cropperCurrentCrop();
   const dataUrl = backgroundCropperState.pendingDataUrl;
   const placement = coverageCurrentPlacement();
+  const softBackground = Boolean(softBackgroundInput?.checked);
   const result = await window.memoEdge.saveBackgroundImage?.(dataUrl);
   if (!result?.ok || !result?.url) {
     setSettingsStatus(`배경 저장 실패: ${result?.message || "이미지 없음"}`, 0);
@@ -4672,7 +5104,9 @@ async function applyBackgroundPlacement() {
     backgroundImage: result.url,
     backgroundSourceImage: sourceUrl,
     backgroundCrop: crop,
-    backgroundOpacity: normalizeOpacity(memo?.backgroundOpacity),
+    backgroundOpacity: softBackground
+      ? SOFT_BACKGROUND_OPACITY
+      : normalizeOpacity(memo?.backgroundOpacity),
     backgroundTop: placement.top,
     backgroundCoverage: placement.coverage,
     backgroundPositionX: placement.positionX,
@@ -4781,6 +5215,75 @@ async function importFontForApp() {
   setSettingsStatus("글씨체 추가됨");
 }
 
+function renderCustomEmojiSettings() {
+  if (!customEmojiList) return;
+  const emojis = normalizeCustomEmojiImages(state.prefs?.customEmojiImages);
+  customEmojiList.innerHTML = "";
+  if (!emojis.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint-text custom-emoji-empty";
+    empty.textContent = "추가된 사진 이모티콘이 없습니다.";
+    customEmojiList.appendChild(empty);
+    return;
+  }
+
+  emojis.forEach((emoji) => {
+    const item = document.createElement("div");
+    item.className = "custom-emoji-item";
+
+    const preview = document.createElement("img");
+    preview.src = emoji.url;
+    preview.alt = "";
+
+    const name = document.createElement("span");
+    name.textContent = emoji.name;
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "small-button danger";
+    removeButton.textContent = "삭제";
+    removeButton.addEventListener("click", () => {
+      state.prefs = normalizeAppPrefs({
+        ...state.prefs,
+        customEmojiImages: emojis.filter((item) => item.id !== emoji.id)
+      });
+      renderCustomEmojiSettings();
+      renderEmojiPalette();
+      saveState();
+    });
+
+    item.append(preview, name, removeButton);
+    customEmojiList.appendChild(item);
+  });
+}
+
+async function importEmojiImageForApp() {
+  const result = await window.memoEdge.importEmojiImage?.();
+  if (result?.canceled) return;
+  if (!result?.ok || !result?.emoji?.url) {
+    setSettingsStatus(`이모티콘 추가 실패: ${result?.message || "이미지 없음"}`, 0);
+    return;
+  }
+
+  const current = normalizeCustomEmojiImages(state.prefs?.customEmojiImages);
+  state.prefs = normalizeAppPrefs({
+    ...state.prefs,
+    customEmojiImages: [
+      {
+        id: result.emoji.id || createId(),
+        name: result.emoji.name || "이모티콘",
+        url: result.emoji.url,
+        createdAt: Date.now()
+      },
+      ...current
+    ]
+  });
+  renderCustomEmojiSettings();
+  renderEmojiPalette();
+  saveState();
+  setSettingsStatus("이모티콘 사진 추가됨");
+}
+
 async function importBackgroundForMemo(id) {
   const result = await window.memoEdge.importBackgroundImage?.();
   if (result?.canceled) return;
@@ -4861,6 +5364,7 @@ async function applySettings() {
   const cycleShortcut = cycleShortcutInput.value.trim() || DEFAULT_CYCLE_SHORTCUT;
   const hideShortcut = hideShortcutInput.value.trim() || DEFAULT_HIDE_SHORTCUT;
   const findShortcut = findShortcutInput?.value.trim() || DEFAULT_FIND_SHORTCUT;
+  const emojiShortcut = emojiShortcutInput?.value.trim() || DEFAULT_EMOJI_SHORTCUT;
   state.memoDefaults = normalizeMemoDefaults({
     fontFamily: defaultFontFamilySelect.value,
     fontSize: defaultFontSizeSelect.value,
@@ -4876,7 +5380,7 @@ async function applySettings() {
   });
   if (startupInput) startupInput.checked = true;
 
-  const shortcutKeys = [cycleShortcut, hideShortcut, findShortcut].map((shortcut) => shortcut.toLowerCase());
+  const shortcutKeys = [cycleShortcut, hideShortcut, findShortcut, emojiShortcut].map((shortcut) => shortcut.toLowerCase());
   if (new Set(shortcutKeys).size !== shortcutKeys.length) {
     setSettingsStatus("단축키는 서로 달라야 합니다.", 0);
     return;
@@ -4893,6 +5397,8 @@ async function applySettings() {
     cycleShortcut,
     hideShortcut,
     findShortcut,
+    emojiShortcut,
+    alwaysOnTop: alwaysOnTopInput?.checked !== false,
     followCursorDisplay: selectedDisplay === "auto",
     targetDisplayId: selectedDisplay === "auto" ? null : Number(selectedDisplay)
   };
@@ -4907,7 +5413,7 @@ async function applySettings() {
   activeSubtitle.textContent = "";
   saveState();
 
-  const failures = [result.shortcutStatus?.cycle, result.shortcutStatus?.hide]
+  const failures = [result.shortcutStatus?.cycle, result.shortcutStatus?.hide, result.shortcutStatus?.emoji]
     .filter((item) => item && !item.ok)
     .map((item) => item.message);
   setSettingsStatus(failures.length ? failures.join(" / ") : "적용됨");
@@ -5003,6 +5509,7 @@ editor.addEventListener("click", (event) => {
   scheduleTableToolsRefresh();
 });
 document.addEventListener("selectionchange", () => {
+  rememberEditorSelection();
   scheduleToolbarRefresh();
   if (document.activeElement === editor || editor.contains(document.activeElement)) {
     scheduleTableToolsRefresh();
@@ -5022,12 +5529,28 @@ document.addEventListener("pointerdown", (event) => {
   if (!(target instanceof Element)) return;
   const textColorField = textColorInput?.closest(".toolbar-color-field");
   if (
+    memoColorPalette &&
+    !memoColorPalette.classList.contains("hidden") &&
+    !memoColorPalette.contains(target) &&
+    !activeColorButton?.contains(target)
+  ) {
+    setMemoColorPaletteOpen(false);
+  }
+  if (
     textColorPalette &&
     !textColorPalette.classList.contains("hidden") &&
     !textColorPalette.contains(target) &&
     !textColorField?.contains(target)
   ) {
     setTextColorPaletteOpen(false);
+  }
+  if (
+    emojiPalette &&
+    !emojiPalette.classList.contains("hidden") &&
+    !emojiPalette.contains(target) &&
+    !emojiButton?.contains(target)
+  ) {
+    setEmojiPaletteOpen(false);
   }
   if (
     editor.contains(target) ||
@@ -5042,13 +5565,11 @@ document.addEventListener("pointerdown", (event) => {
 collapseButton.addEventListener("click", () => setExpanded(false));
 toolbarToggleButton?.addEventListener("click", toggleToolbarVisibility);
 settingsButton.addEventListener("click", openSettings);
-deleteActiveMemoButton?.addEventListener("click", () => {
-  const memo = activeMemo();
-  if (memo) deleteIndex(memo.id);
-});
+topmostToggleButton?.addEventListener("click", () => updateAlwaysOnTopSetting(!(state.shell?.alwaysOnTop !== false)));
 closeSettingsButton.addEventListener("click", closeSettings);
 allMemosButton.addEventListener("click", () => setMemoListOpen(memoListPanel.classList.contains("hidden")));
 activePopupButton?.addEventListener("click", popupActiveMemo);
+activeColorButton?.addEventListener("click", toggleMemoColorPalette);
 closeMemoListButton.addEventListener("click", () => setMemoListOpen(false));
 closeMemoSearchButton?.addEventListener("click", closeMemoSearch);
 memoSearchInput?.addEventListener("input", renderMemoSearchResults);
@@ -5069,6 +5590,7 @@ memoSearchInput?.addEventListener("keydown", (event) => {
 });
 addSettingsIndexButton.addEventListener("click", addIndex);
 importFontButton?.addEventListener("click", importFontForApp);
+importEmojiImageButton?.addEventListener("click", importEmojiImageForApp);
 [commonFontFamilySelect, defaultFontFamilySelect].forEach((select) => {
   select?.addEventListener("change", () => {
     select.style.fontFamily = fontFamilyCss(select.value);
@@ -5107,6 +5629,11 @@ cropperClearBackgroundButton?.addEventListener("click", () => {
   if (memoId) clearBackgroundForMemo(memoId);
 });
 cropperApplyButton?.addEventListener("click", applyBackgroundCrop);
+softBackgroundInput?.addEventListener("change", () => {
+  if (backgroundCropperState?.mode === "coverage" && softBackgroundInput.checked) {
+    resetCoveragePreviewLayout(true);
+  }
+});
 document.addEventListener("paste", handleEditorPaste);
 window.addEventListener("resize", handleCropperWindowResize);
 lengthSelect.addEventListener("change", syncPanelSizeFields);
@@ -5133,6 +5660,7 @@ activeTitleInput.addEventListener("keydown", (event) => {
 undoButton.addEventListener("click", undoEditor);
 redoButton.addEventListener("click", redoEditor);
 bulletButton.addEventListener("click", () => execCommand("insertUnorderedList"));
+orderedListButton?.addEventListener("click", () => execCommand("insertOrderedList"));
 checkButton.addEventListener("click", insertChecklist);
 tableButton?.addEventListener("mousedown", (event) => {
   event.preventDefault();
@@ -5187,12 +5715,20 @@ textColorInput?.closest(".toolbar-color-field")?.addEventListener("click", (even
 });
 textColorInput?.addEventListener("click", (event) => event.preventDefault());
 textColorInput?.addEventListener("input", () => applyTextColor(textColorInput.value));
-fontFamilyToolbarSelect?.addEventListener("mousedown", rememberEditorSelection);
-fontSizeToolbarSelect?.addEventListener("mousedown", rememberEditorSelection);
-lineSpacingToolbarSelect?.addEventListener("mousedown", rememberEditorSelection);
-fontSizeToolbarSelect.addEventListener("change", () => {
-  applyInlineTextStyle("fontSize", `${normalizeFontSize(fontSizeToolbarSelect.value)}px`);
+emojiButton?.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+  rememberEditorSelection();
 });
+emojiButton?.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleEmojiPalette();
+});
+[fontFamilyToolbarSelect, fontSizeToolbarSelect, lineSpacingToolbarSelect].forEach((control) => {
+  control?.addEventListener("pointerdown", rememberEditorSelection, { capture: true });
+  control?.addEventListener("mousedown", rememberEditorSelection);
+});
+fontSizeToolbarSelect.addEventListener("input", () => applyFontSizeControlValue(fontSizeToolbarSelect));
+fontSizeToolbarSelect.addEventListener("change", () => applyFontSizeControlValue(fontSizeToolbarSelect, { force: true }));
 fontFamilyToolbarSelect.addEventListener("change", () => {
   fontFamilyToolbarSelect.style.fontFamily = fontFamilyCss(fontFamilyToolbarSelect.value);
   applyInlineTextStyle("fontFamily", fontFamilyCss(fontFamilyToolbarSelect.value));
@@ -5201,6 +5737,7 @@ lineSpacingToolbarSelect.addEventListener("change", () => {
   applyLineSpacingToSelection(lineSpacingToolbarSelect.value);
 });
 clearButton?.addEventListener("click", clearEditorPreservingUndo);
+alwaysOnTopInput?.addEventListener("change", () => updateAlwaysOnTopSetting(alwaysOnTopInput.checked));
 applySettingsButton.addEventListener("click", applySettings);
 exportDataButton?.addEventListener("click", exportData);
 importDataButton?.addEventListener("click", importData);
@@ -5218,7 +5755,9 @@ closeLaunchGuideButton?.addEventListener("click", closeLaunchGuide);
 setupShortcutCapture(cycleShortcutInput, DEFAULT_CYCLE_SHORTCUT);
 setupShortcutCapture(hideShortcutInput, DEFAULT_HIDE_SHORTCUT);
 if (findShortcutInput) setupShortcutCapture(findShortcutInput, DEFAULT_FIND_SHORTCUT);
+if (emojiShortcutInput) setupShortcutCapture(emojiShortcutInput, DEFAULT_EMOJI_SHORTCUT);
 document.addEventListener("keydown", handleFindShortcut, true);
+document.addEventListener("keydown", handleEmojiShortcut, true);
 
 window.memoEdge.onExpandedChanged((nextExpanded) => {
   expanded = nextExpanded;
@@ -5228,6 +5767,7 @@ window.memoEdge.onExpandedChanged((nextExpanded) => {
 });
 
 window.memoEdge.onCycleFloating(cycleFloatingMemo);
+window.memoEdge.onOpenEmoji?.(openEmojiFromShortcut);
 window.memoEdge.onOpenSettings(openSettings);
 window.memoEdge.onDetachedMemoUpdated?.(applyDetachedMemoUpdate);
 window.memoEdge.onDetachedMemoAttached?.((id) => reattachDetachedMemo(id));

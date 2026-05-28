@@ -1,7 +1,9 @@
 const CHECK_TEXT_PLACEHOLDER = "\u200b";
+const APP_STORAGE_KEY = "memo-bom-state-v2";
 const DEFAULT_FONT_FAMILY = "Gulim";
 const DEFAULT_FONT_SIZE = 15;
 const DEFAULT_LINE_SPACING = 1.5;
+const DEFAULT_EMOJI_SHORTCUT = "CommandOrControl+Shift+E";
 const MAX_PASTED_TABLE_ROWS = 80;
 const MAX_PASTED_TABLE_COLS = 40;
 const SAVE_DEBOUNCE_MS = 450;
@@ -9,11 +11,16 @@ const HISTORY_DEBOUNCE_MS = 650;
 const MAX_EDITOR_HISTORY_ENTRIES = 35;
 const MAX_EDITOR_HISTORY_BYTES = 1800000;
 const FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64, 72, 96];
+const MIN_FONT_SIZE = FONT_SIZE_OPTIONS[0];
+const MAX_FONT_SIZE = FONT_SIZE_OPTIONS[FONT_SIZE_OPTIONS.length - 1];
 const LINE_SPACING_OPTIONS = [0.8, 1, 1.15, 1.5, 2, 2.5, 3, 3.5, 4];
 const DETACHED_RECENT_TEXT_COLORS_KEY = "memo-bom-detached-recent-text-colors";
 const MAX_RECENT_TEXT_COLORS = 6;
+const MAX_CUSTOM_EMOJI_IMAGES = 24;
+const CARRIED_TYPING_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color"];
 const PERF_WARN_MS = 16;
 const PERF_SLOW_WARN_MS = 50;
+const SOFT_BACKGROUND_OPACITY = 0.62;
 const TEXT_COLOR_PRESETS = [
   "#283044",
   "#111827",
@@ -25,6 +32,73 @@ const TEXT_COLOR_PRESETS = [
   "#8b5cf6",
   "#ec4899",
   "#ffffff"
+];
+const EMOJI_PRESETS = [
+  "😀",
+  "😄",
+  "😊",
+  "🙂",
+  "😂",
+  "🤣",
+  "😍",
+  "🥰",
+  "😎",
+  "🤔",
+  "😅",
+  "😢",
+  "😡",
+  "😴",
+  "😱",
+  "🙄",
+  "👍",
+  "👎",
+  "👏",
+  "🙏",
+  "💪",
+  "👌",
+  "🙌",
+  "🤝",
+  "✋",
+  "🔥",
+  "⭐",
+  "🌟",
+  "💯",
+  "✅",
+  "☑️",
+  "❌",
+  "⭕",
+  "⚠️",
+  "❗",
+  "❓",
+  "🔔",
+  "💡",
+  "📌",
+  "📎",
+  "📅",
+  "⏰",
+  "📝",
+  "📋",
+  "📊",
+  "📈",
+  "📉",
+  "💼",
+  "📁",
+  "🔍",
+  "🔒",
+  "🎯",
+  "🚀",
+  "🏁",
+  "🏆",
+  "🔁",
+  "⬆️",
+  "⬇️",
+  "➡️",
+  "⬅️",
+  "🎉",
+  "❤️",
+  "💙",
+  "☕",
+  "🍀"
 ];
 
 const FONT_LABELS = {
@@ -73,6 +147,7 @@ let lastRenderedTableSelection = { table: null, cells: new Set(), activeCell: nu
 let recentTextColors = loadRecentTextColors();
 let backgroundCropperState = null;
 let attachingDetachedMemo = false;
+let emojiShortcut = DEFAULT_EMOJI_SHORTCUT;
 
 const titleInput = document.getElementById("detachedTitleInput");
 const editor = document.getElementById("detachedEditor");
@@ -84,11 +159,14 @@ const lineSpacingSelect = document.getElementById("lineSpacingSelect");
 const undoButton = document.getElementById("undoButton");
 const redoButton = document.getElementById("redoButton");
 const bulletButton = document.getElementById("bulletButton");
+const orderedListButton = document.getElementById("orderedListButton");
 const checkButton = document.getElementById("checkButton");
 const tableButton = document.getElementById("tableButton");
 const clearButton = document.getElementById("clearButton");
 const textColorInput = document.getElementById("textColorInput");
 const textColorPalette = document.getElementById("textColorPalette");
+const emojiButton = document.getElementById("emojiButton");
+const emojiPalette = document.getElementById("emojiPalette");
 const backgroundButton = document.getElementById("backgroundButton");
 const backgroundCropper = document.getElementById("backgroundCropper");
 const cropperTitle = document.getElementById("cropperTitle");
@@ -102,6 +180,7 @@ const cropperApplyButton = document.getElementById("cropperApplyButton");
 const cropperCancelButton = document.getElementById("cropperCancelButton");
 const cropperResetButton = document.getElementById("cropperResetButton");
 const cropperClearBackgroundButton = document.getElementById("cropperClearBackgroundButton");
+const softBackgroundInput = document.getElementById("softBackgroundInput");
 const tablePicker = document.getElementById("tablePicker");
 const tableRowsInput = document.getElementById("tableRowsInput");
 const tableColsInput = document.getElementById("tableColsInput");
@@ -144,6 +223,33 @@ function normalizeTextColorList(value) {
   ].slice(0, MAX_RECENT_TEXT_COLORS);
 }
 
+function normalizeCustomEmojiImages(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map((item) => {
+      const url = normalizeAssetUrl(item?.url);
+      if (!url || seen.has(url)) return null;
+      seen.add(url);
+      return {
+        id: typeof item?.id === "string" && item.id ? item.id : url,
+        name: typeof item?.name === "string" && item.name.trim() ? item.name.trim().slice(0, 40) : "이모티콘",
+        url
+      };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_CUSTOM_EMOJI_IMAGES);
+}
+
+function loadCustomEmojiImages() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || "{}");
+    return normalizeCustomEmojiImages(raw?.prefs?.customEmojiImages);
+  } catch {
+    return [];
+  }
+}
+
 function loadRecentTextColors() {
   try {
     return normalizeTextColorList(JSON.parse(localStorage.getItem(DETACHED_RECENT_TEXT_COLORS_KEY) || "[]"));
@@ -158,7 +264,7 @@ function saveRecentTextColors() {
 
 function normalizeFontSize(value) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? clamp(Math.round(numeric), 8, 96) : DEFAULT_FONT_SIZE;
+  return Number.isFinite(numeric) ? clamp(Math.round(numeric), MIN_FONT_SIZE, MAX_FONT_SIZE) : DEFAULT_FONT_SIZE;
 }
 
 function normalizeLineSpacing(value) {
@@ -358,6 +464,25 @@ function populateFontSizeSelect(select, currentSize) {
     select.appendChild(option);
   });
   select.value = String(current);
+}
+
+function validEditableFontSize(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric < MIN_FONT_SIZE || numeric > MAX_FONT_SIZE) return null;
+  return normalizeFontSize(numeric);
+}
+
+function applyFontSizeControlValue(control, options = {}) {
+  if (!control) return;
+  const rawValue = String(control.value || "").trim();
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) return;
+
+  const size = options.force ? normalizeFontSize(numeric) : validEditableFontSize(numeric);
+  if (!size) return;
+  if (options.force) control.value = String(size);
+  applyInlineTextStyle("fontSize", `${size}px`);
 }
 
 function formatLineSpacing(value) {
@@ -689,14 +814,30 @@ function selectWrappedTextNodes(operations) {
   return true;
 }
 
-function insertTypingStyleAnchor(range, property, value) {
+function createTypingStyleAnchor(styles = {}) {
   const span = document.createElement("span");
   span.className = "typing-style-anchor";
-  span.style[property] = value;
+  Object.entries(styles).forEach(([property, value]) => {
+    if (value) span.style[property] = value;
+  });
   const textNode = document.createTextNode(CHECK_TEXT_PLACEHOLDER);
   span.appendChild(textNode);
-  range.insertNode(span);
+  return { span, textNode };
+}
 
+function selectionStartElement(range) {
+  const node = range?.startContainer;
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+}
+
+function typingStyleAnchorAtRange(range) {
+  const element = selectionStartElement(range);
+  const anchor = element?.closest?.(".typing-style-anchor");
+  return anchor && editor.contains(anchor) ? anchor : null;
+}
+
+function setRangeAtTextEnd(textNode) {
   const nextRange = document.createRange();
   nextRange.setStart(textNode, textNode.nodeValue.length);
   nextRange.collapse(true);
@@ -704,6 +845,83 @@ function insertTypingStyleAnchor(range, property, value) {
   selection.removeAllRanges();
   selection.addRange(nextRange);
   savedEditorRange = nextRange.cloneRange();
+}
+
+function insertTypingStyleAnchor(range, styles = {}) {
+  const existingAnchor = typingStyleAnchorAtRange(range);
+  if (existingAnchor) {
+    Object.entries(styles).forEach(([property, value]) => {
+      if (value) existingAnchor.style[property] = value;
+    });
+    const textNode = Array.from(existingAnchor.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
+    if (!textNode || !textNode.nodeValue) {
+      if (textNode) textNode.nodeValue = CHECK_TEXT_PLACEHOLDER;
+      setRangeAtTextEnd(textNode || existingAnchor.appendChild(document.createTextNode(CHECK_TEXT_PLACEHOLDER)));
+      return;
+    }
+    const nextRange = range.cloneRange();
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
+    savedEditorRange = nextRange.cloneRange();
+    return;
+  }
+
+  const { span, textNode } = createTypingStyleAnchor(styles);
+  range.insertNode(span);
+  setRangeAtTextEnd(textNode);
+}
+
+function rangeIntersectsNode(range, node) {
+  try {
+    return range.intersectsNode(node);
+  } catch {
+    return false;
+  }
+}
+
+function applyInlineObjectStyle(range, property, value) {
+  if (property !== "fontSize") return false;
+  const objects = Array.from(editor.querySelectorAll(".memo-custom-emoji")).filter((node) =>
+    rangeIntersectsNode(range, node)
+  );
+  objects.forEach((node) => {
+    node.style.fontSize = value;
+  });
+  return objects.length > 0;
+}
+
+function replaceElementWithStyledSpan(element, styles = {}) {
+  const span = document.createElement("span");
+  Object.entries(styles).forEach(([property, value]) => {
+    span.style[property] = value;
+  });
+  while (element.firstChild) span.appendChild(element.firstChild);
+  element.replaceWith(span);
+  return span;
+}
+
+function applyNativeFontSizeToSelection(value) {
+  const existingElements = new WeakSet(Array.from(editor.querySelectorAll("*")));
+  try {
+    document.execCommand("styleWithCSS", false, false);
+    document.execCommand("fontSize", false, "7");
+  } catch {
+    return false;
+  }
+
+  let converted = false;
+  editor.querySelectorAll("font[size='7']").forEach((font) => {
+    replaceElementWithStyledSpan(font, { fontSize: value });
+    converted = true;
+  });
+  editor.querySelectorAll("span[style]").forEach((span) => {
+    if (existingElements.has(span) || !span.style.fontSize) return;
+    span.style.fontSize = value;
+    converted = true;
+  });
+
+  return converted;
 }
 
 function wrapTextNodeSegment(node, startOffset, endOffset, property, value) {
@@ -754,16 +972,53 @@ function wrapRangeTextNodes(range, property, value) {
   return selectWrappedTextNodes(operations);
 }
 
+function selectionElementFromRange(range) {
+  if (!range) return null;
+  const node = range.startContainer;
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const child = node.childNodes[Math.max(0, range.startOffset - 1)] || node.childNodes[range.startOffset] || node;
+    return child.nodeType === Node.ELEMENT_NODE ? child : child.parentElement;
+  }
+  return node.parentElement;
+}
+
+function carriedTypingStylesFromRange(range = currentEditorRange()) {
+  const element = selectionElementFromRange(range);
+  if (!element || !editor.contains(element)) return {};
+  const block = closestLineBlock(element);
+  const chain = [];
+  let current = element;
+
+  while (current && current !== editor && editor.contains(current)) {
+    if (current instanceof HTMLElement) chain.push(current);
+    if (current === block) break;
+    current = current.parentElement;
+  }
+
+  return chain.reverse().reduce((styles, node) => {
+    CARRIED_TYPING_STYLE_PROPERTIES.forEach((property) => {
+      if (node.style[property]) styles[property] = node.style[property];
+    });
+    return styles;
+  }, {});
+}
+
 function applyInlineTextStyle(property, value) {
   const returnFocusElement = document.activeElement;
-  restoreEditorSelection();
+  if (!restoreEditorSelection()) ensureEditorSelectionAtInsertionPoint();
   const range = currentEditorRange();
   if (!range) return;
+  let changed = false;
   if (range.collapsed) {
-    insertTypingStyleAnchor(range, property, value);
+    insertTypingStyleAnchor(range, { ...carriedTypingStylesFromRange(range), [property]: value });
+    changed = true;
   } else {
-    wrapRangeTextNodes(range.cloneRange(), property, value);
+    const fallbackRange = range.cloneRange();
+    changed = applyInlineObjectStyle(range, property, value);
+    changed = wrapRangeTextNodes(fallbackRange, property, value) || changed;
+    if (!changed && property === "fontSize") changed = applyNativeFontSizeToSelection(value);
   }
+  if (!changed) return;
   scheduleSave();
   pushEditorHistory();
   updateToolbarCommandState();
@@ -1063,8 +1318,10 @@ function setCropperMode(mode) {
 
 function beginCoveragePlacement(dataUrl, crop) {
   if (!backgroundCropperState || !coverageImage) return;
+  const softBackground = Boolean(softBackgroundInput?.checked);
   backgroundCropperState.pendingDataUrl = dataUrl;
   backgroundCropperState.pendingCrop = crop;
+  backgroundCropperState.softBackground = softBackground;
   backgroundCropperState.initialPlacement = backgroundPlacementFromMemo(memo);
   backgroundCropperState.imagePositionX = backgroundCropperState.initialPlacement.positionX;
   backgroundCropperState.imagePositionY = backgroundCropperState.initialPlacement.positionY;
@@ -1075,10 +1332,10 @@ function beginCoveragePlacement(dataUrl, crop) {
   coveragePreview?.querySelector(".coverage-preview-title") &&
     (coveragePreview.querySelector(".coverage-preview-title").textContent = memo?.title || "메모");
   setCropperMode("coverage");
-  coverageImage.onload = () => requestAnimationFrame(() => resetCoveragePreviewLayout());
+  coverageImage.onload = () => requestAnimationFrame(() => resetCoveragePreviewLayout(softBackground));
   coverageImage.removeAttribute("src");
   coverageImage.src = dataUrl;
-  requestAnimationFrame(() => resetCoveragePreviewLayout());
+  requestAnimationFrame(() => resetCoveragePreviewLayout(softBackground));
 }
 
 function openBackgroundCropper(sourceUrl, crop = null, isExisting = false) {
@@ -1097,9 +1354,11 @@ function openBackgroundCropper(sourceUrl, crop = null, isExisting = false) {
     imagePositionX: normalizeBackgroundPosition(memo?.backgroundPositionX),
     imagePositionY: normalizeBackgroundPosition(memo?.backgroundPositionY),
     imageMoveMode: false,
+    softBackground: false,
     drag: null
   };
   setCropperMode("crop");
+  if (softBackgroundInput) softBackgroundInput.checked = false;
   cropperClearBackgroundButton?.classList.toggle("hidden", !backgroundCropperState.isExisting);
   cropperApplyButton.disabled = false;
   cropperImage.onload = () => requestAnimationFrame(() => resetCropBox());
@@ -1308,6 +1567,7 @@ async function applyBackgroundPlacement() {
   const crop = backgroundCropperState.pendingCrop || cropperCurrentCrop();
   const dataUrl = backgroundCropperState.pendingDataUrl;
   const placement = coverageCurrentPlacement();
+  const softBackground = Boolean(softBackgroundInput?.checked);
   const result = await window.memoEdge.saveBackgroundImage?.(dataUrl);
   if (!result?.ok || !result?.url) {
     saveStatus.textContent = `Background save failed: ${result?.message || "no image"}`;
@@ -1317,7 +1577,9 @@ async function applyBackgroundPlacement() {
   memo.backgroundImage = result.url;
   memo.backgroundSourceImage = sourceUrl;
   memo.backgroundCrop = crop;
-  memo.backgroundOpacity = normalizeOpacity(memo.backgroundOpacity);
+  memo.backgroundOpacity = softBackground
+    ? SOFT_BACKGROUND_OPACITY
+    : normalizeOpacity(memo.backgroundOpacity);
   memo.backgroundTop = placement.top;
   memo.backgroundCoverage = placement.coverage;
   memo.backgroundPositionX = placement.positionX;
@@ -1486,6 +1748,179 @@ function renderTextColorPalette() {
   textColorPalette.appendChild(customLabel);
 }
 
+function setEmojiPaletteOpen(open) {
+  if (!emojiPalette) return;
+  if (open) renderEmojiPalette();
+  emojiPalette.classList.toggle("hidden", !open);
+  emojiButton?.classList.toggle("active", open);
+}
+
+function toggleEmojiPalette() {
+  setEmojiPaletteOpen(emojiPalette?.classList.contains("hidden"));
+}
+
+function renderEmojiPalette() {
+  if (!emojiPalette) return;
+  emojiPalette.innerHTML = "";
+  loadCustomEmojiImages().forEach((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "emoji-swatch custom-emoji-swatch";
+    button.title = emoji.name;
+    button.setAttribute("aria-label", emoji.name);
+    const image = document.createElement("img");
+    image.src = emoji.url;
+    image.alt = "";
+    button.appendChild(image);
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      rememberEditorSelection();
+    });
+    button.addEventListener("click", () => {
+      insertCustomEmojiImage(emoji);
+      setEmojiPaletteOpen(false);
+    });
+    emojiPalette.appendChild(button);
+  });
+
+  EMOJI_PRESETS.forEach((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "emoji-swatch";
+    button.textContent = emoji;
+    button.title = emoji;
+    button.setAttribute("aria-label", emoji);
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      rememberEditorSelection();
+    });
+    button.addEventListener("click", () => {
+      insertEmoji(emoji);
+      setEmojiPaletteOpen(false);
+    });
+    emojiPalette.appendChild(button);
+  });
+}
+
+function ensureEditorSelectionAtInsertionPoint() {
+  if (restoreEditorSelection()) return;
+  editor.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+}
+
+function insertEmoji(emoji) {
+  const value = String(emoji || "");
+  if (!value) return;
+  flushPendingEditorHistory();
+  ensureEditorSelectionAtInsertionPoint();
+  document.execCommand("insertText", false, value);
+  scheduleSave();
+  pushEditorHistory();
+  rememberEditorSelection();
+  scheduleToolbarRefresh();
+}
+
+function createCustomEmojiElement(emoji, styles = {}) {
+  const image = document.createElement("img");
+  image.className = "memo-custom-emoji";
+  image.src = emoji.url;
+  image.alt = emoji.name || "emoji";
+  image.title = emoji.name || "";
+  if (styles.fontSize) image.style.fontSize = styles.fontSize;
+  return image;
+}
+
+function placeCaretAfterNode(node) {
+  const range = document.createRange();
+  range.setStartAfter(node);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+}
+
+function insertCustomEmojiImage(emoji) {
+  if (!emoji?.url) return;
+  flushPendingEditorHistory();
+  ensureEditorSelectionAtInsertionPoint();
+  const image = createCustomEmojiElement(emoji, carriedTypingStylesFromRange(currentEditorRange()));
+  insertNodeAtSelection(image);
+  placeCaretAfterNode(image);
+  scheduleSave();
+  pushEditorHistory();
+  scheduleToolbarRefresh();
+}
+
+function normalizeShortcutKey(key) {
+  if (!key) return "";
+  const keyMap = {
+    " ": "Space",
+    Spacebar: "Space",
+    Esc: "Escape",
+    Del: "Delete",
+    ArrowUp: "Up",
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    "+": "Plus",
+    "=": "Plus",
+    "-": "-",
+    ",": ",",
+    ".": ".",
+    "/": "/",
+    ";": ";",
+    "'": "'",
+    "`": "`",
+    "[": "[",
+    "]": "]",
+    "\\": "\\"
+  };
+  if (keyMap[key]) return keyMap[key];
+  if (/^F\d{1,2}$/i.test(key)) return key.toUpperCase();
+  if (key.length === 1) return key.toUpperCase();
+  return key;
+}
+
+function acceleratorFromEvent(event) {
+  const modifierKeys = ["Control", "Shift", "Alt", "Meta", "OS"];
+  if (modifierKeys.includes(event.key)) return "";
+
+  const parts = [];
+  if (event.ctrlKey || event.metaKey) parts.push("CommandOrControl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+
+  const key = normalizeShortcutKey(event.key);
+  if (!key) return "";
+  parts.push(key);
+  return [...new Set(parts)].join("+");
+}
+
+function shortcutMatchesEvent(event, shortcut) {
+  const expected = typeof shortcut === "string" && shortcut.trim() ? shortcut.trim().toLowerCase() : "";
+  if (!expected) return false;
+  return acceleratorFromEvent(event).toLowerCase() === expected;
+}
+
+function handleEmojiShortcut(event) {
+  if (!shortcutMatchesEvent(event, emojiShortcut || DEFAULT_EMOJI_SHORTCUT)) return;
+
+  const target = event.target;
+  if (target instanceof Element && target.closest("input, textarea, select") && !editor.contains(target)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  rememberEditorSelection();
+  toggleEmojiPalette();
+}
+
 function clearEditorPreservingUndo() {
   editor.focus();
   pushEditorHistory();
@@ -1521,11 +1956,13 @@ function rememberEditorSelection() {
 }
 
 function restoreEditorSelection() {
-  editor.focus();
   if (!selectionBelongsToEditor(savedEditorRange)) return false;
+  const range = savedEditorRange.cloneRange();
+  editor.focus({ preventScroll: true });
   const selection = window.getSelection();
   selection.removeAllRanges();
-  selection.addRange(savedEditorRange);
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
   return true;
 }
 
@@ -2642,6 +3079,7 @@ editor.addEventListener("click", (event) => {
   scheduleTableToolsRefresh();
 });
 document.addEventListener("selectionchange", () => {
+  rememberEditorSelection();
   scheduleToolbarRefresh();
   if (document.activeElement === editor || editor.contains(document.activeElement)) {
     scheduleTableToolsRefresh();
@@ -2651,6 +3089,7 @@ document.addEventListener("pointermove", moveTableCellSelection);
 document.addEventListener("pointerup", endTableCellSelection);
 document.addEventListener("pointercancel", endTableCellSelection);
 document.addEventListener("keydown", handleDetachedWindowShortcut, true);
+document.addEventListener("keydown", handleEmojiShortcut, true);
 document.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -2663,6 +3102,14 @@ document.addEventListener("pointerdown", (event) => {
   ) {
     setTextColorPaletteOpen(false);
   }
+  if (
+    emojiPalette &&
+    !emojiPalette.classList.contains("hidden") &&
+    !emojiPalette.contains(target) &&
+    !emojiButton?.contains(target)
+  ) {
+    setEmojiPaletteOpen(false);
+  }
   if (editor.contains(target) || tableTools.contains(target) || tablePicker.contains(target) || tableButton.contains(target)) {
     return;
   }
@@ -2673,6 +3120,7 @@ attachButton.addEventListener("click", attachDetachedMemoToMain);
 undoButton.addEventListener("click", undoEditor);
 redoButton.addEventListener("click", redoEditor);
 bulletButton.addEventListener("click", () => execCommand("insertUnorderedList"));
+orderedListButton?.addEventListener("click", () => execCommand("insertOrderedList"));
 checkButton.addEventListener("click", insertChecklist);
 clearButton?.addEventListener("click", clearEditorPreservingUndo);
 backgroundButton?.addEventListener("click", editBackgroundForDetachedMemo);
@@ -2698,6 +3146,11 @@ cropperResetButton?.addEventListener("click", () => {
 });
 cropperClearBackgroundButton?.addEventListener("click", clearDetachedBackground);
 cropperApplyButton?.addEventListener("click", applyBackgroundCrop);
+softBackgroundInput?.addEventListener("change", () => {
+  if (backgroundCropperState?.mode === "coverage" && softBackgroundInput.checked) {
+    resetCoveragePreviewLayout(true);
+  }
+});
 document.addEventListener("paste", handleEditorPaste);
 window.addEventListener("resize", handleCropperWindowResize);
 tableButton.addEventListener("click", () => {
@@ -2749,16 +3202,24 @@ textColorInput?.closest(".toolbar-color-field")?.addEventListener("click", (even
 });
 textColorInput?.addEventListener("click", (event) => event.preventDefault());
 textColorInput?.addEventListener("input", () => applyTextColor(textColorInput.value));
-fontFamilySelect?.addEventListener("mousedown", rememberEditorSelection);
-fontSizeSelect?.addEventListener("mousedown", rememberEditorSelection);
-lineSpacingSelect?.addEventListener("mousedown", rememberEditorSelection);
+emojiButton?.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+  rememberEditorSelection();
+});
+emojiButton?.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleEmojiPalette();
+});
+[fontFamilySelect, fontSizeSelect, lineSpacingSelect].forEach((control) => {
+  control?.addEventListener("pointerdown", rememberEditorSelection, { capture: true });
+  control?.addEventListener("mousedown", rememberEditorSelection);
+});
 fontFamilySelect.addEventListener("change", () => {
   fontFamilySelect.style.fontFamily = fontFamilyCss(fontFamilySelect.value);
   applyInlineTextStyle("fontFamily", fontFamilyCss(fontFamilySelect.value));
 });
-fontSizeSelect.addEventListener("change", () => {
-  applyInlineTextStyle("fontSize", `${normalizeFontSize(fontSizeSelect.value)}px`);
-});
+fontSizeSelect.addEventListener("input", () => applyFontSizeControlValue(fontSizeSelect));
+fontSizeSelect.addEventListener("change", () => applyFontSizeControlValue(fontSizeSelect, { force: true }));
 lineSpacingSelect.addEventListener("change", () => {
   applyLineSpacingToSelection(lineSpacingSelect.value);
 });
@@ -2777,6 +3238,16 @@ window.memoEdge.onDetachedMemoRefresh?.((nextMemo) => {
 });
 
 async function initialize() {
+  try {
+    const shellState = await window.memoEdge.getShellState?.();
+    const nextShortcut = shellState?.settings?.emojiShortcut;
+    if (typeof nextShortcut === "string" && nextShortcut.trim()) {
+      emojiShortcut = nextShortcut.trim();
+    }
+  } catch {
+    emojiShortcut = DEFAULT_EMOJI_SHORTCUT;
+  }
+
   const result = await window.memoEdge.getDetachedMemo();
   applyMemo(result?.memo || {});
 

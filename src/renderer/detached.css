@@ -240,6 +240,13 @@ button:not(:disabled):active {
   vector-effect: non-scaling-stroke;
 }
 
+.emoji-tool-icon {
+  display: block;
+  font-size: 15px;
+  line-height: 1;
+  transform: translateY(-0.5px);
+}
+
 .toolbar-select,
 .toolbar-size-select,
 .toolbar-line-select {
@@ -354,7 +361,8 @@ input.toolbar-line-select {
   pointer-events: none;
 }
 
-.text-color-palette {
+.text-color-palette,
+.emoji-palette {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -364,16 +372,24 @@ input.toolbar-line-select {
   background: color-mix(in srgb, var(--note-bg) 84%, #ffffff);
 }
 
-.text-color-palette:not(.hidden) {
+.text-color-palette:not(.hidden),
+.emoji-palette:not(.hidden) {
   animation: surface-enter var(--motion-fast) var(--motion-ease) both;
 }
 
-.text-color-palette.hidden {
+.emoji-palette:not(.hidden) {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.text-color-palette.hidden,
+.emoji-palette.hidden {
   display: none;
 }
 
 .text-color-swatch,
-.text-color-custom {
+.text-color-custom,
+.emoji-swatch {
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -400,6 +416,26 @@ input.toolbar-line-select {
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+.emoji-swatch {
+  background: rgba(255, 255, 255, 0.66);
+  font-size: 17px;
+  box-shadow: none;
+}
+
+.custom-emoji-swatch img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.emoji-swatch:hover,
+.emoji-swatch:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .table-picker,
@@ -559,6 +595,16 @@ input.toolbar-line-select {
   border-radius: var(--radius-compact);
 }
 
+.memo-custom-emoji {
+  width: 1.35em;
+  height: 1.35em;
+  display: inline-block;
+  margin: 0 0.08em;
+  border-radius: 0.28em;
+  object-fit: cover;
+  vertical-align: -0.28em;
+}
+
 .memo-table {
   width: 100%;
   margin: 8px 0;
@@ -677,6 +723,24 @@ input.toolbar-line-select {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.soft-background-field {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: #34405a;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.soft-background-field input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
 }
 
 .cropper-stage {

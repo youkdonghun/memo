@@ -31,6 +31,7 @@
           <button class="tool-button" type="button" data-command="italic" title="기울임"><i>I</i></button>
           <button class="tool-button" type="button" data-command="underline" title="밑줄"><u>U</u></button>
           <button id="bulletButton" class="tool-button" type="button" title="목록">•</button>
+          <button id="orderedListButton" class="tool-button" type="button" title="번호 목록">1.</button>
           <button id="checkButton" class="tool-button" type="button" title="체크">☐</button>
           <button id="tableButton" class="tool-button" type="button" title="표 삽입" aria-label="표 삽입">
             <svg class="toolbar-svg table-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -49,9 +50,13 @@
               <path d="M6.5 17l4.2-4.4 3.2 3.1 2.1-2.3 1.5 3.6"></path>
             </svg>
           </button>
+          <button id="emojiButton" class="tool-button" type="button" title="이모티콘 (Ctrl+Shift+E)" aria-label="이모티콘">
+            <span class="emoji-tool-icon" aria-hidden="true">☺</span>
+          </button>
         </div>
       </div>
       <div id="textColorPalette" class="text-color-palette hidden" aria-label="Text color palette"></div>
+      <div id="emojiPalette" class="emoji-palette hidden" aria-label="이모티콘 선택"></div>
 
       <div id="detachedEditor" class="detached-editor" contenteditable="true" spellcheck="false"></div>
       <div id="tablePicker" class="table-picker hidden" aria-label="표 삽입">
@@ -158,6 +163,10 @@
             </div>
           </div>
           <div class="cropper-actions">
+            <label class="soft-background-field">
+              <input id="softBackgroundInput" type="checkbox" />
+              <span>은은하게 넣기</span>
+            </label>
             <button id="cropperResetButton" class="small-button" type="button">전체</button>
             <button id="cropperClearBackgroundButton" class="small-button danger hidden" type="button">배경 지우기</button>
             <button id="cropperApplyButton" class="small-button" type="button">등록</button>

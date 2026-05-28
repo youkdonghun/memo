@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
   cycleShortcut: "CommandOrControl+Shift+D",
   hideShortcut: "CommandOrControl+Shift+F",
   findShortcut: "CommandOrControl+F",
+  emojiShortcut: "CommandOrControl+Shift+E",
+  alwaysOnTop: true,
   anchor: "middle",
   manualYOffset: 0,
   followCursorDisplay: false,
@@ -59,6 +61,7 @@ let settings = { ...DEFAULT_SETTINGS };
 let expanded = false;
 let registeredCycleShortcut = null;
 let registeredHideShortcut = null;
+let registeredEmojiShortcut = null;
 let followDisplayTimer = null;
 let isQuitting = false;
 let settingsOpen = false;
@@ -66,6 +69,7 @@ let temporaryPanelWidth = null;
 let sideTitleEditOpen = false;
 let settingsSaveTimer = null;
 let startupNotificationShown = false;
+let shortcutTopmostActive = false;
 const detachedWindows = new Map();
 const detachedMemos = new Map();
 
@@ -157,6 +161,11 @@ function normalizeSettings(partial = {}) {
       typeof merged.findShortcut === "string" && merged.findShortcut.trim()
         ? merged.findShortcut.trim()
         : DEFAULT_SETTINGS.findShortcut,
+    emojiShortcut:
+      typeof merged.emojiShortcut === "string" && merged.emojiShortcut.trim()
+        ? merged.emojiShortcut.trim()
+        : DEFAULT_SETTINGS.emojiShortcut,
+    alwaysOnTop: merged.alwaysOnTop !== false,
     anchor: anchorAlias,
     manualYOffset:
       edgeOffset,
@@ -286,6 +295,30 @@ async function importBackgroundImage() {
   const target = path.join(userDataAssetDir("backgrounds"), fileName);
   fs.copyFileSync(source, target);
   return { ok: true, path: target, url: pathToFileURL(target).href };
+}
+
+async function importEmojiImage() {
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: "이모티콘 이미지 추가",
+    properties: ["openFile"],
+    filters: [{ name: "Image Files", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }]
+  });
+
+  if (result.canceled || !result.filePaths?.[0]) return { ok: false, canceled: true };
+
+  const source = result.filePaths[0];
+  const fileName = `${Date.now()}-${safeFileName(path.basename(source), "emoji")}`;
+  const target = path.join(userDataAssetDir("emojis"), fileName);
+  fs.copyFileSync(source, target);
+  return {
+    ok: true,
+    emoji: {
+      id: `emoji-${Date.now()}`,
+      name: path.basename(source, path.extname(source)),
+      path: target,
+      url: pathToFileURL(target).href
+    }
+  };
 }
 
 function saveCroppedBackgroundImage(dataUrl) {
@@ -479,6 +512,18 @@ function displayInfos() {
   }));
 }
 
+function applyWindowZOrder() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.setAlwaysOnTop(settings.alwaysOnTop !== false || shortcutTopmostActive);
+}
+
+function bringMainWindowToFront() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) mainWindow.showInactive();
+  if (typeof mainWindow.moveTop === "function") mainWindow.moveTop();
+  if (shortcutTopmostActive) mainWindow.focus();
+}
+
 function loginItemOptions() {
   return app.isPackaged
     ? { path: process.execPath, args: [] }
@@ -489,15 +534,18 @@ function setExpanded(nextExpanded, notifyRenderer = true) {
   expanded = Boolean(nextExpanded);
   if (expanded) sideTitleEditOpen = false;
   if (!expanded) {
+    shortcutTopmostActive = false;
     settingsOpen = false;
     temporaryPanelWidth = null;
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
+    applyWindowZOrder();
     refreshWindowBounds(true);
     if (notifyRenderer) {
       mainWindow.webContents.send("shell:expanded-changed", expanded);
     }
     applyWindowVisibility();
+    if (expanded && shortcutTopmostActive) bringMainWindowToFront();
   }
   refreshTrayMenu();
 }
@@ -530,14 +578,17 @@ function setTemporaryPanelWidth(nextWidth) {
   };
 }
 
-function showWindow() {
+function showWindow(options = {}) {
+  if (options.forceTopmost) shortcutTopmostActive = true;
   if (!mainWindow || mainWindow.isDestroyed()) {
     createMainWindow();
     return;
   }
+  applyWindowZOrder();
   mainWindow.showInactive();
   refreshWindowBounds(true);
   applyWindowVisibility();
+  if (options.forceTopmost) bringMainWindowToFront();
 }
 
 function hideWindowToTray() {
@@ -546,8 +597,8 @@ function hideWindowToTray() {
   mainWindow.hide();
 }
 
-function sendRendererCommand(channel) {
-  showWindow();
+function sendRendererCommand(channel, options = {}) {
+  showWindow(options);
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.webContents.isLoading()) {
     mainWindow.webContents.once("did-finish-load", () => {
@@ -701,21 +752,32 @@ function unregisterShortcuts() {
     globalShortcut.unregister(registeredHideShortcut);
     registeredHideShortcut = null;
   }
+  if (registeredEmojiShortcut) {
+    globalShortcut.unregister(registeredEmojiShortcut);
+    registeredEmojiShortcut = null;
+  }
 }
 
 function registerShortcuts() {
   unregisterShortcuts();
 
   const cycleRegistered = globalShortcut.register(settings.cycleShortcut, () => {
-    sendRendererCommand("shortcut:cycle-floating");
+    sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true });
   });
 
   const hideRegistered = globalShortcut.register(settings.hideShortcut, () => {
     setExpanded(false);
   });
 
+  const emojiRegistered = globalShortcut.register(settings.emojiShortcut, () => {
+    shortcutTopmostActive = true;
+    setExpanded(true);
+    sendRendererCommand("shortcut:open-emoji", { forceTopmost: true });
+  });
+
   if (cycleRegistered) registeredCycleShortcut = settings.cycleShortcut;
   if (hideRegistered) registeredHideShortcut = settings.hideShortcut;
+  if (emojiRegistered) registeredEmojiShortcut = settings.emojiShortcut;
 
   return {
     cycle: {
@@ -727,6 +789,11 @@ function registerShortcuts() {
       ok: hideRegistered,
       shortcut: settings.hideShortcut,
       message: hideRegistered ? "" : `단축키 등록 실패: ${settings.hideShortcut}`
+    },
+    emoji: {
+      ok: emojiRegistered,
+      shortcut: settings.emojiShortcut,
+      message: emojiRegistered ? "" : `단축키 등록 실패: ${settings.emojiShortcut}`
     }
   };
 }
@@ -737,7 +804,7 @@ function refreshTrayMenu() {
   const template = [
     {
       label: "다음 메모 열기",
-      click: () => sendRendererCommand("shortcut:cycle-floating")
+      click: () => sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true })
     },
     {
       label: "숨기기",
@@ -765,7 +832,7 @@ function createTray() {
   if (tray) return;
 
   tray = new Tray(createIconImage());
-  tray.on("click", () => sendRendererCommand("shortcut:cycle-floating"));
+  tray.on("click", () => sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true }));
   refreshTrayMenu();
 }
 
@@ -785,7 +852,7 @@ function showBackgroundStartupNotification() {
         icon: iconPath || undefined,
         silent: true
       });
-      notification.on("click", () => sendRendererCommand("shortcut:cycle-floating"));
+      notification.on("click", () => sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true }));
       notification.show();
       return;
     }
@@ -823,7 +890,7 @@ function createMainWindow() {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    alwaysOnTop: true,
+    alwaysOnTop: settings.alwaysOnTop !== false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -833,6 +900,7 @@ function createMainWindow() {
 
   mainWindow.setSkipTaskbar(true);
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  applyWindowZOrder();
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   mainWindow.webContents.once("did-finish-load", () => {
     refreshWindowBounds(false);
@@ -863,7 +931,7 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    sendRendererCommand("shortcut:cycle-floating");
+    sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true });
   });
 
   app.whenReady().then(() => {
@@ -912,6 +980,7 @@ ipcMain.handle("shell:update-settings", (_, partialSettings = {}) => {
   }
   saveSettings();
   const shortcutStatus = registerShortcuts();
+  applyWindowZOrder();
   refreshWindowBounds(true);
   applyWindowVisibility();
   refreshTrayMenu();
@@ -1016,6 +1085,14 @@ ipcMain.handle("fonts:import", async () => {
 ipcMain.handle("background:import", async () => {
   try {
     return await importBackgroundImage();
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("emoji:import-image", async () => {
+  try {
+    return await importEmojiImage();
   } catch (error) {
     return { ok: false, message: String(error?.message || error) };
   }
