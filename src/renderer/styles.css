@@ -1036,7 +1036,7 @@ button:not(:disabled):not(.edge-handle):active {
 
 .table-tool-icon,
 .background-tool-icon,
-.unlink-tool-icon {
+.link-tool-icon {
   width: 17px;
   height: 17px;
   display: block;

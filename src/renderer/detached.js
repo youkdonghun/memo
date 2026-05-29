@@ -131,7 +131,7 @@ const defaultToolbarButtons = {
   table: true,
   textColor: true,
   background: true,
-  unlink: true,
+  link: true,
   emoji: true
 };
 
@@ -187,7 +187,7 @@ const tableButton = document.getElementById("tableButton");
 const clearButton = document.getElementById("clearButton");
 const textColorInput = document.getElementById("textColorInput");
 const textColorPalette = document.getElementById("textColorPalette");
-const unlinkButton = document.getElementById("unlinkButton");
+const linkButton = document.getElementById("linkButton");
 const emojiButton = document.getElementById("emojiButton");
 const emojiPalette = document.getElementById("emojiPalette");
 const attachmentButton = document.getElementById("detachedAttachmentButton");
@@ -2547,6 +2547,10 @@ function insertNodeAtSelection(node) {
   range.insertNode(node);
 }
 
+function isLikelyEmailAddress(value) {
+  return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(String(value || "").trim());
+}
+
 function normalizeLinkUrl(value) {
   const raw = String(value || "")
     .trim()
@@ -2554,7 +2558,9 @@ function normalizeLinkUrl(value) {
     .replace(/>+$/, "")
     .replace(/[.,!?;:)\]\u3002\uff0c\uff01\uff1f\uff1b\uff1a]+$/u, "");
   if (!raw) return "";
-  if (/^(https?:|mailto:)/i.test(raw)) return raw;
+  if (/^mailto:/i.test(raw)) return raw;
+  if (isLikelyEmailAddress(raw)) return `mailto:${raw}`;
+  if (/^https?:/i.test(raw)) return raw;
   if (/^www\./i.test(raw)) return `https://${raw}`;
   if (/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?$/i.test(raw)) {
     return `https://${raw}`;
@@ -2564,12 +2570,12 @@ function normalizeLinkUrl(value) {
 
 function normalizeAutoLinkUrl(value) {
   const raw = String(value || "").trim();
-  if (!/^(https?:\/\/|www\.|mailto:)/i.test(raw)) return "";
+  if (!isLikelyEmailAddress(raw) && !/^(https?:\/\/|www\.|mailto:)/i.test(raw)) return "";
   return normalizeLinkUrl(raw);
 }
 
 function textContainsAutoLink(value) {
-  return /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+)/i.test(String(value || ""));
+  return /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i.test(String(value || ""));
 }
 
 function htmlContainsLink(value) {
@@ -2598,6 +2604,14 @@ function createLinkElement(text, href) {
   return link;
 }
 
+function linkTextFromInput(input, href) {
+  const raw = String(input || "").trim();
+  if (!raw) return href;
+  if (/^mailto:/i.test(raw)) return raw.replace(/^mailto:/i, "");
+  if (isLikelyEmailAddress(raw)) return raw;
+  return raw;
+}
+
 function editorRangeFromPoint(event) {
   if (document.caretRangeFromPoint) return document.caretRangeFromPoint(event.clientX, event.clientY);
   const position = document.caretPositionFromPoint?.(event.clientX, event.clientY);
@@ -2624,6 +2638,10 @@ function linksIntersectingRange(range) {
   });
 }
 
+function linksForEditorSelection(selection, range) {
+  return range.collapsed ? [linkElementFromNode(selection.anchorNode)].filter(Boolean) : linksIntersectingRange(range);
+}
+
 function unwrapLinkElement(link) {
   if (!link?.parentNode) return false;
   link.replaceWith(...Array.from(link.childNodes));
@@ -2632,7 +2650,7 @@ function unwrapLinkElement(link) {
 
 function insertTextWithAutoLinks(text) {
   const fragment = document.createDocumentFragment();
-  const pattern = /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  const pattern = /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/gi;
   let lastIndex = 0;
   let match;
   while ((match = pattern.exec(text)) !== null) {
@@ -2660,7 +2678,7 @@ function unlinkEditorSelection() {
   const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
   if (!range || !editor.contains(range.commonAncestorContainer)) return;
 
-  const targetLinks = range.collapsed ? [linkElementFromNode(selection.anchorNode)].filter(Boolean) : linksIntersectingRange(range);
+  const targetLinks = linksForEditorSelection(selection, range);
   if (!targetLinks.length) return;
 
   if (range.collapsed) {
@@ -2708,10 +2726,11 @@ function insertOrUpdateLink() {
   const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
   const selectedText = range && editor.contains(range.commonAncestorContainer) ? range.toString().trim() : "";
   const selectedHref = normalizeLinkUrl(selectedText);
-  const input = window.prompt("연결할 주소를 입력하세요.", selectedHref || "");
+  const defaultInput = selectedHref?.startsWith("mailto:") && isLikelyEmailAddress(selectedText) ? selectedText : selectedHref;
+  const input = window.prompt("연결할 주소를 입력하세요.", defaultInput || "");
   const href = normalizeLinkUrl(input);
   if (!href) return;
-  const link = createLinkElement(selectedText || href, href);
+  const link = createLinkElement(selectedText || linkTextFromInput(input, href), href);
   if (!range || !editor.contains(range.commonAncestorContainer) || range.collapsed) {
     insertNodeAtSelection(link);
   } else {
@@ -2726,6 +2745,17 @@ function insertOrUpdateLink() {
   savedEditorRange = nextRange.cloneRange();
   scheduleSave();
   pushEditorHistory();
+}
+
+function toggleLinkEditorSelection() {
+  restoreEditorSelection();
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  if (range && editor.contains(range.commonAncestorContainer) && linksForEditorSelection(selection, range).length) {
+    unlinkEditorSelection();
+    return;
+  }
+  insertOrUpdateLink();
 }
 
 function handleEditorLinkClick(event) {
@@ -3945,7 +3975,7 @@ addReminderButton?.addEventListener("click", addOrUpdateReminder);
   control?.addEventListener("input", () => setReminderStatus(""));
   control?.addEventListener("change", () => setReminderStatus(""));
 });
-unlinkButton?.addEventListener("click", unlinkEditorSelection);
+linkButton?.addEventListener("click", toggleLinkEditorSelection);
 backgroundButton?.addEventListener("click", editBackgroundForDetachedMemo);
 cropperStage?.addEventListener("pointerdown", beginCropDrag);
 cropperStage?.addEventListener("pointermove", moveCropDrag);
