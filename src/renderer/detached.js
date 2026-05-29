@@ -2568,6 +2568,38 @@ function normalizeLinkUrl(value) {
   return "";
 }
 
+function cleanManualLinkHref(value) {
+  const raw = String(value || "")
+    .trim()
+    .replace(/^<+/, "")
+    .replace(/>+$/, "");
+  if (!raw) return "";
+  if (/^(javascript|vbscript|data):/i.test(raw)) return "";
+  return raw;
+}
+
+function normalizeStoredLinkHref(value, fallback = "") {
+  const raw = cleanManualLinkHref(value) || cleanManualLinkHref(fallback);
+  if (!raw) return "";
+  return normalizeLinkUrl(raw) || raw;
+}
+
+function linkHrefForEditing(link) {
+  return cleanManualLinkHref(link?.getAttribute("href") || link?.textContent || "");
+}
+
+function linkHrefForOpening(link) {
+  const raw = linkHrefForEditing(link);
+  if (!raw) return "";
+  return normalizeLinkUrl(raw) || raw;
+}
+
+function applyLinkAttributes(link, href) {
+  link.setAttribute("href", href);
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noreferrer");
+}
+
 function normalizeAutoLinkUrl(value) {
   const raw = String(value || "").trim();
   if (!isLikelyEmailAddress(raw) && !/^(https?:\/\/|www\.|mailto:)/i.test(raw)) return "";
@@ -2584,22 +2616,18 @@ function htmlContainsLink(value) {
 
 function sanitizeLinks(root = editor) {
   root.querySelectorAll("a").forEach((link) => {
-    const href = normalizeLinkUrl(link.getAttribute("href") || link.textContent);
+    const href = normalizeStoredLinkHref(link.getAttribute("href"), link.textContent);
     if (!href) {
       link.replaceWith(...Array.from(link.childNodes));
       return;
     }
-    link.setAttribute("href", href);
-    link.setAttribute("target", "_blank");
-    link.setAttribute("rel", "noreferrer");
+    applyLinkAttributes(link, href);
   });
 }
 
 function createLinkElement(text, href) {
   const link = document.createElement("a");
-  link.href = href;
-  link.target = "_blank";
-  link.rel = "noreferrer";
+  applyLinkAttributes(link, href);
   link.textContent = text || href;
   return link;
 }
@@ -2645,6 +2673,19 @@ function linksForEditorSelection(selection, range) {
 function unwrapLinkElement(link) {
   if (!link?.parentNode) return false;
   link.replaceWith(...Array.from(link.childNodes));
+  return true;
+}
+
+function updateExistingLinks(targetLinks, href) {
+  const links = Array.from(new Set(targetLinks || [])).filter((link) => link?.isConnected);
+  if (!links.length) return false;
+  if (!href) {
+    links.forEach(unwrapLinkElement);
+  } else {
+    links.forEach((link) => applyLinkAttributes(link, href));
+  }
+  scheduleSave();
+  pushEditorHistory();
   return true;
 }
 
@@ -2722,39 +2763,40 @@ function insertHtmlWithSafeLinks(html) {
 
 function insertOrUpdateLink() {
   restoreEditorSelection();
+  editor.focus();
   const selection = window.getSelection();
   const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-  const selectedText = range && editor.contains(range.commonAncestorContainer) ? range.toString().trim() : "";
-  const selectedHref = normalizeLinkUrl(selectedText);
-  const defaultInput = selectedHref?.startsWith("mailto:") && isLikelyEmailAddress(selectedText) ? selectedText : selectedHref;
+  const editorRange = range && editor.contains(range.commonAncestorContainer) ? range.cloneRange() : null;
+  const selectedText = editorRange ? editorRange.toString().trim() : "";
+  const targetLinks = editorRange ? linksForEditorSelection(selection, editorRange) : [];
+  const defaultInput = targetLinks.length ? linkHrefForEditing(targetLinks[0]) : "";
   const input = window.prompt("연결할 주소를 입력하세요.", defaultInput || "");
-  const href = normalizeLinkUrl(input);
+  if (input === null) return;
+  const href = cleanManualLinkHref(input);
+  if (targetLinks.length) {
+    updateExistingLinks(targetLinks, href);
+    return;
+  }
   if (!href) return;
   const link = createLinkElement(selectedText || linkTextFromInput(input, href), href);
-  if (!range || !editor.contains(range.commonAncestorContainer) || range.collapsed) {
+  if (!editorRange) {
     insertNodeAtSelection(link);
   } else {
-    range.deleteContents();
-    range.insertNode(link);
+    editorRange.deleteContents();
+    editorRange.insertNode(link);
   }
   const nextRange = document.createRange();
   nextRange.setStartAfter(link);
   nextRange.collapse(true);
-  selection.removeAllRanges();
-  selection.addRange(nextRange);
+  const nextSelection = window.getSelection();
+  nextSelection.removeAllRanges();
+  nextSelection.addRange(nextRange);
   savedEditorRange = nextRange.cloneRange();
   scheduleSave();
   pushEditorHistory();
 }
 
 function toggleLinkEditorSelection() {
-  restoreEditorSelection();
-  const selection = window.getSelection();
-  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-  if (range && editor.contains(range.commonAncestorContainer) && linksForEditorSelection(selection, range).length) {
-    unlinkEditorSelection();
-    return;
-  }
   insertOrUpdateLink();
 }
 
@@ -2763,7 +2805,7 @@ function handleEditorLinkClick(event) {
   if (!link || !editor.contains(link)) return;
   event.preventDefault();
   event.stopPropagation();
-  const href = normalizeLinkUrl(link.getAttribute("href"));
+  const href = linkHrefForOpening(link);
   if (href) window.memoEdge.openExternal?.(href);
 }
 
