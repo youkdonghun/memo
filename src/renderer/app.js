@@ -323,6 +323,7 @@ let pendingResizeSize = null;
 let resizeFrame = null;
 let temporarySettingsPanelWidth = null;
 let savedEditorRange = null;
+let linkPopoverState = null;
 let handleDragState = null;
 let handleClickTimer = null;
 let sideTitleEditor = null;
@@ -412,6 +413,12 @@ const emojiButton = document.getElementById("emojiButton");
 const emojiPalette = document.getElementById("emojiPalette");
 const backgroundButton = document.getElementById("backgroundButton");
 const linkButton = document.getElementById("linkButton");
+const linkPopover = document.getElementById("linkPopover");
+const linkInput = document.getElementById("linkInput");
+const applyLinkButton = document.getElementById("applyLinkButton");
+const unlinkButton = document.getElementById("unlinkButton");
+const closeLinkButton = document.getElementById("closeLinkButton");
+const linkStatus = document.getElementById("linkStatus");
 const backgroundCropper = document.getElementById("backgroundCropper");
 const cropperTitle = document.getElementById("cropperTitle");
 const cropperStage = document.getElementById("cropperStage");
@@ -3846,7 +3853,7 @@ function cleanManualLinkHref(value) {
 function normalizeStoredLinkHref(value, fallback = "") {
   const raw = cleanManualLinkHref(value) || cleanManualLinkHref(fallback);
   if (!raw) return "";
-  return normalizeLinkUrl(raw) || raw;
+  return raw;
 }
 
 function linkHrefForEditing(link) {
@@ -3897,14 +3904,6 @@ function createLinkElement(text, href) {
   return link;
 }
 
-function linkTextFromInput(input, href) {
-  const raw = String(input || "").trim();
-  if (!raw) return href;
-  if (/^mailto:/i.test(raw)) return raw.replace(/^mailto:/i, "");
-  if (isLikelyEmailAddress(raw)) return raw;
-  return raw;
-}
-
 function editorRangeFromPoint(event) {
   if (document.caretRangeFromPoint) return document.caretRangeFromPoint(event.clientX, event.clientY);
   const position = document.caretPositionFromPoint?.(event.clientX, event.clientY);
@@ -3952,6 +3951,135 @@ function updateExistingLinks(targetLinks, href) {
   persistEditor();
   pushEditorHistory();
   return true;
+}
+
+function setLinkPopoverStatus(message = "") {
+  if (linkStatus) linkStatus.textContent = message;
+  linkInput?.classList.toggle("invalid", Boolean(message));
+}
+
+function setLinkPopoverOpen(open) {
+  if (!linkPopover) return;
+  linkPopover.classList.toggle("hidden", !open);
+  linkButton?.classList.toggle("active", open);
+  if (!open) {
+    linkPopoverState = null;
+    setLinkPopoverStatus("");
+  }
+}
+
+function captureLinkPopoverTarget() {
+  restoreEditorSelection();
+  const selection = window.getSelection();
+  const activeRange = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const range = selectionBelongsToEditor(activeRange)
+    ? activeRange.cloneRange()
+    : selectionBelongsToEditor(savedEditorRange)
+      ? savedEditorRange.cloneRange()
+      : null;
+  let links = [];
+  if (range) {
+    links = range.collapsed ? [linkElementFromNode(range.startContainer)].filter(Boolean) : linksIntersectingRange(range);
+  }
+  return { range, links: Array.from(new Set(links)) };
+}
+
+function openLinkPopover() {
+  if (!linkPopover || !linkInput) return;
+  const target = captureLinkPopoverTarget();
+  linkPopoverState = target;
+  const currentHref = target.links.length ? linkHrefForEditing(target.links[0]) : "";
+  linkInput.value = currentHref;
+  unlinkButton?.classList.toggle("hidden", !target.links.length);
+  setLinkPopoverStatus("");
+  setMemoColorPaletteOpen(false);
+  setTextColorPaletteOpen(false);
+  setEmojiPaletteOpen(false);
+  setTablePickerOpen(false);
+  setLinkPopoverOpen(true);
+  requestAnimationFrame(() => {
+    linkInput.focus();
+    linkInput.select();
+  });
+}
+
+function closeLinkPopover({ restoreFocus = false } = {}) {
+  setLinkPopoverOpen(false);
+  if (restoreFocus) editor.focus({ preventScroll: true });
+}
+
+function restoreLinkPopoverRange() {
+  const range = linkPopoverState?.range;
+  if (!selectionBelongsToEditor(range)) {
+    ensureEditorSelectionAtInsertionPoint();
+    return false;
+  }
+  const nextRange = range.cloneRange();
+  editor.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+  savedEditorRange = nextRange.cloneRange();
+  return true;
+}
+
+function applyLinkFromPopover() {
+  if (!linkInput) return;
+  const href = cleanManualLinkHref(linkInput.value);
+  if (!href) {
+    setLinkPopoverStatus("링크 주소를 입력하세요.");
+    linkInput.focus();
+    return;
+  }
+
+  const target = linkPopoverState || captureLinkPopoverTarget();
+  const targetLinks = Array.from(new Set(target.links || [])).filter((link) => link?.isConnected);
+  if (targetLinks.length) {
+    updateExistingLinks(targetLinks, href);
+    closeLinkPopover({ restoreFocus: true });
+    return;
+  }
+
+  linkPopoverState = target;
+  const selectedText = selectionBelongsToEditor(target.range) ? target.range.toString().trim() : "";
+  restoreLinkPopoverRange();
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const link = createLinkElement(selectedText || href, href);
+  if (range && selectionBelongsToEditor(range)) {
+    range.deleteContents();
+    range.insertNode(link);
+  } else {
+    insertNodeAtSelection(link);
+  }
+
+  const nextRange = document.createRange();
+  nextRange.setStartAfter(link);
+  nextRange.collapse(true);
+  const nextSelection = window.getSelection();
+  nextSelection?.removeAllRanges();
+  nextSelection?.addRange(nextRange);
+  savedEditorRange = nextRange.cloneRange();
+  persistEditor();
+  pushEditorHistory();
+  closeLinkPopover({ restoreFocus: true });
+}
+
+function unlinkFromPopover() {
+  const targetLinks = Array.from(new Set(linkPopoverState?.links || [])).filter((link) => link?.isConnected);
+  if (targetLinks.length) updateExistingLinks(targetLinks, "");
+  closeLinkPopover({ restoreFocus: true });
+}
+
+function handleLinkPopoverKeydown(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    applyLinkFromPopover();
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeLinkPopover({ restoreFocus: true });
+  }
 }
 
 function insertTextWithAutoLinks(text) {
@@ -4026,43 +4154,8 @@ function insertHtmlWithSafeLinks(html) {
   pushEditorHistory();
 }
 
-function insertOrUpdateLink() {
-  restoreEditorSelection();
-  editor.focus();
-  const selection = window.getSelection();
-  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-  const editorRange = range && selectionBelongsToEditor(range) ? range.cloneRange() : null;
-  const selectedText = editorRange ? editorRange.toString().trim() : "";
-  const targetLinks = editorRange ? linksForEditorSelection(selection, editorRange) : [];
-  const defaultInput = targetLinks.length ? linkHrefForEditing(targetLinks[0]) : "";
-  const input = window.prompt("연결할 주소를 입력하세요.", defaultInput || "");
-  if (input === null) return;
-  const href = cleanManualLinkHref(input);
-  if (targetLinks.length) {
-    updateExistingLinks(targetLinks, href);
-    return;
-  }
-  if (!href) return;
-  const link = createLinkElement(selectedText || linkTextFromInput(input, href), href);
-  if (!editorRange) {
-    insertNodeAtSelection(link);
-  } else {
-    editorRange.deleteContents();
-    editorRange.insertNode(link);
-  }
-  const nextRange = document.createRange();
-  nextRange.setStartAfter(link);
-  nextRange.collapse(true);
-  const nextSelection = window.getSelection();
-  nextSelection.removeAllRanges();
-  nextSelection.addRange(nextRange);
-  savedEditorRange = nextRange.cloneRange();
-  persistEditor();
-  pushEditorHistory();
-}
-
 function toggleLinkEditorSelection() {
-  insertOrUpdateLink();
+  openLinkPopover();
 }
 
 function handleEditorLinkClick(event) {
@@ -6681,6 +6774,10 @@ document.addEventListener("pointerdown", (event) => {
   ) {
     setTextColorPaletteOpen(false);
   }
+  if (linkPopover && !linkPopover.classList.contains("hidden")) {
+    if (linkPopover.contains(target) || linkButton?.contains(target)) return;
+    closeLinkPopover();
+  }
   if (
     editor.contains(target) ||
     tableTools?.contains(target) ||
@@ -6702,6 +6799,11 @@ addReminderButton?.addEventListener("click", addOrUpdateReminder);
   control?.addEventListener("change", () => setReminderStatus(""));
 });
 linkButton?.addEventListener("click", toggleLinkEditorSelection);
+linkInput?.addEventListener("input", () => setLinkPopoverStatus(""));
+linkInput?.addEventListener("keydown", handleLinkPopoverKeydown);
+applyLinkButton?.addEventListener("click", applyLinkFromPopover);
+unlinkButton?.addEventListener("click", unlinkFromPopover);
+closeLinkButton?.addEventListener("click", () => closeLinkPopover({ restoreFocus: true }));
 settingsButton.addEventListener("click", openSettings);
 topmostToggleButton?.addEventListener("click", () => updateAlwaysOnTopSetting(!(state.shell?.alwaysOnTop !== false)));
 closeSettingsButton.addEventListener("click", closeSettings);

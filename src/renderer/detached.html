@@ -79,6 +79,13 @@
       </div>
       <div id="textColorPalette" class="text-color-palette hidden" aria-label="Text color palette"></div>
       <div id="emojiPalette" class="emoji-palette hidden" aria-label="이모티콘 선택"></div>
+      <div id="linkPopover" class="link-popover hidden" aria-label="링크 입력">
+        <input id="linkInput" class="link-popover-input" type="text" placeholder="링크 주소" autocomplete="off" />
+        <button id="applyLinkButton" class="small-button" type="button">적용</button>
+        <button id="unlinkButton" class="small-button danger hidden" type="button">해제</button>
+        <button id="closeLinkButton" class="small-button" type="button">닫기</button>
+        <span id="linkStatus" class="link-popover-status" aria-live="polite"></span>
+      </div>
       <div id="detachedAttachmentPanel" class="detached-side-panel hidden" aria-label="첨부파일">
         <div class="detached-side-panel-header">
           <strong>첨부파일</strong>

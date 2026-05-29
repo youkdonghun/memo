@@ -521,6 +521,57 @@ input.toolbar-line-select {
   display: none;
 }
 
+.link-popover {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+  background: color-mix(in srgb, var(--note-bg) 86%, #ffffff);
+}
+
+.link-popover:not(.hidden) {
+  animation: surface-enter var(--motion-fast) var(--motion-ease) both;
+}
+
+.link-popover.hidden {
+  display: none;
+}
+
+.link-popover-input {
+  flex: 1 1 180px;
+  min-width: 120px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 18%, transparent);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--note-text);
+  font: inherit;
+  outline: none;
+}
+
+.link-popover-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.link-popover-input.invalid {
+  border-color: #c23535;
+}
+
+.link-popover-status {
+  flex-basis: 100%;
+  min-height: 14px;
+  color: #a43737;
+  font-size: 11px;
+}
+
+.link-popover-status:empty {
+  display: none;
+}
+
 .text-color-swatch,
 .text-color-custom,
 .emoji-swatch {
