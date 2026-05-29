@@ -169,6 +169,7 @@ const defaultToolbarButtons = {
   table: true,
   textColor: true,
   background: true,
+  unlink: true,
   emoji: true
 };
 
@@ -188,6 +189,7 @@ const toolbarButtonLabels = {
   table: "표",
   textColor: "글씨 색",
   background: "배경",
+  unlink: "링크 해제",
   emoji: "이모티콘"
 };
 
@@ -409,7 +411,7 @@ const textColorPalette = document.getElementById("textColorPalette");
 const emojiButton = document.getElementById("emojiButton");
 const emojiPalette = document.getElementById("emojiPalette");
 const backgroundButton = document.getElementById("backgroundButton");
-const linkButton = document.getElementById("linkButton");
+const unlinkButton = document.getElementById("unlinkButton");
 const backgroundCropper = document.getElementById("backgroundCropper");
 const cropperTitle = document.getElementById("cropperTitle");
 const cropperStage = document.getElementById("cropperStage");
@@ -3825,8 +3827,14 @@ function normalizeLinkUrl(value) {
   return "";
 }
 
+function normalizeAutoLinkUrl(value) {
+  const raw = String(value || "").trim();
+  if (!/^(https?:\/\/|www\.|mailto:)/i.test(raw)) return "";
+  return normalizeLinkUrl(raw);
+}
+
 function textContainsAutoLink(value) {
-  return /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?)/i.test(String(value || ""));
+  return /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+)/i.test(String(value || ""));
 }
 
 function htmlContainsLink(value) {
@@ -3865,9 +3873,31 @@ function editorRangeFromPoint(event) {
   return range;
 }
 
+function linkElementFromNode(node) {
+  const element = node instanceof Element ? node : node?.parentElement;
+  const link = element?.closest?.("a[href]");
+  return link && editor.contains(link) ? link : null;
+}
+
+function linksIntersectingRange(range) {
+  return Array.from(editor.querySelectorAll("a[href]")).filter((link) => {
+    try {
+      return range.intersectsNode(link);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function unwrapLinkElement(link) {
+  if (!link?.parentNode) return false;
+  link.replaceWith(...Array.from(link.childNodes));
+  return true;
+}
+
 function insertTextWithAutoLinks(text) {
   const fragment = document.createDocumentFragment();
-  const pattern = /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?)/gi;
+  const pattern = /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+)/gi;
   let lastIndex = 0;
   let match;
   while ((match = pattern.exec(text)) !== null) {
@@ -3876,7 +3906,7 @@ function insertTextWithAutoLinks(text) {
     const token = match[0];
     const trimmedToken = token.replace(/[.,!?;:)\]\u3002\uff0c\uff01\uff1f\uff1b\uff1a]+$/u, "");
     const trailing = token.slice(trimmedToken.length);
-    const href = normalizeLinkUrl(trimmedToken);
+    const href = normalizeAutoLinkUrl(trimmedToken);
     fragment.appendChild(href ? createLinkElement(trimmedToken, href) : document.createTextNode(token));
     if (href && trailing) fragment.appendChild(document.createTextNode(trailing));
     lastIndex = match.index + match[0].length;
@@ -3884,6 +3914,40 @@ function insertTextWithAutoLinks(text) {
   const after = text.slice(lastIndex);
   if (after) fragment.appendChild(document.createTextNode(after));
   insertNodeAtSelection(fragment);
+  persistEditor();
+  pushEditorHistory();
+}
+
+function unlinkEditorSelection() {
+  restoreEditorSelection();
+  editor.focus();
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  if (!range || !selectionBelongsToEditor(range)) return;
+
+  const targetLinks = range.collapsed ? [linkElementFromNode(selection.anchorNode)].filter(Boolean) : linksIntersectingRange(range);
+  if (!targetLinks.length) return;
+
+  if (range.collapsed) {
+    const linkRange = document.createRange();
+    linkRange.selectNodeContents(targetLinks[0]);
+    selection.removeAllRanges();
+    selection.addRange(linkRange);
+  }
+
+  let commandSucceeded = false;
+  try {
+    commandSucceeded = document.execCommand("unlink");
+  } catch {
+    commandSucceeded = false;
+  }
+
+  const stillLinked = targetLinks.some((link) => link.isConnected && link.matches("a[href]"));
+  if (!commandSucceeded || stillLinked) {
+    targetLinks.filter((link) => link.isConnected).forEach(unwrapLinkElement);
+  }
+
+  savedEditorRange = selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
   persistEditor();
   pushEditorHistory();
 }
@@ -6565,7 +6629,7 @@ addReminderButton?.addEventListener("click", addOrUpdateReminder);
   control?.addEventListener("input", () => setReminderStatus(""));
   control?.addEventListener("change", () => setReminderStatus(""));
 });
-linkButton?.addEventListener("click", insertOrUpdateLink);
+unlinkButton?.addEventListener("click", unlinkEditorSelection);
 settingsButton.addEventListener("click", openSettings);
 topmostToggleButton?.addEventListener("click", () => updateAlwaysOnTopSetting(!(state.shell?.alwaysOnTop !== false)));
 closeSettingsButton.addEventListener("click", closeSettings);

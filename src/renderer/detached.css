@@ -361,7 +361,8 @@ button:not(:disabled):active {
 }
 
 .table-tool-icon,
-.background-tool-icon {
+.background-tool-icon,
+.unlink-tool-icon {
   width: 17px;
   height: 17px;
   display: block;
