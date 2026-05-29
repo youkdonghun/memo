@@ -311,10 +311,26 @@ button:not(:disabled):active {
 }
 
 .compact-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   min-width: 44px;
   padding: 0 8px;
   font-size: 12px;
   font-weight: 900;
+}
+
+.header-icon-svg {
+  width: 17px;
+  height: 17px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .toolbar-item-hidden {

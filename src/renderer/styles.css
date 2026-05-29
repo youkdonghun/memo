@@ -909,9 +909,35 @@ button:not(:disabled):not(.edge-handle):active {
   line-height: 1;
 }
 
+.header-icon-svg,
+.collapse-icon-svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.header-icon-svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2.1;
+}
+
+.collapse-icon-svg {
+  width: 19px;
+  height: 19px;
+  stroke-width: 2.9;
+}
+
+.collapse-icon-button {
+  font-size: 0;
+}
+
 .badge-button {
   position: relative;
-  font-size: 14px;
+  font-size: 0;
 }
 
 .count-badge {
