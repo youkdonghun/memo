@@ -1,6 +1,6 @@
 const STORAGE_KEY = "memo-bom-state-v2";
 const LEGACY_STORAGE_KEY = "memo-bom-state-v1";
-const STATE_VERSION = 9;
+const STATE_VERSION = 10;
 const MAX_FLOATING = 5;
 const HOVER_DELAY_MS = 200;
 const HANDLE_CLICK_DELAY_MS = 220;
@@ -15,7 +15,7 @@ const DEFAULT_LINE_SPACING = 1.5;
 const DEFAULT_PANEL_WIDTH = 480;
 const DEFAULT_PANEL_HEIGHT = 520;
 const SETTINGS_MIN_PANEL_WIDTH = DEFAULT_PANEL_WIDTH;
-const MIN_PANEL_WIDTH = 280;
+const MIN_PANEL_WIDTH = 340;
 const MAX_PANEL_WIDTH = 1200;
 const MIN_PANEL_HEIGHT = 180;
 const MAX_PANEL_HEIGHT = 1400;
@@ -37,6 +37,11 @@ const HANDLE_REORDER_THRESHOLD = 8;
 const MAX_RECENT_TEXT_COLORS = 6;
 const MAX_CUSTOM_EMOJI_IMAGES = 24;
 const SOFT_BACKGROUND_OPACITY = 0.62;
+const ATTACHMENT_DELETE_WARNING = "연결된 첨부파일이 있습니다. 삭제 시 첨부파일도 같이 삭제됩니다. 삭제하시겠습니까?";
+const REMINDER_DELETE_WARNING = "등록된 알림이 있습니다. 삭제 시 알림도 같이 삭제됩니다. 삭제하시겠습니까?";
+const ATTACHMENT_AND_REMINDER_DELETE_WARNING =
+  "연결된 첨부파일과 등록된 알림이 있습니다. 삭제 시 첨부파일과 알림도 같이 삭제됩니다. 삭제하시겠습니까?";
+const REMINDER_REPEAT_OPTIONS = ["none", "daily", "weekly", "monthly"];
 const CARRIED_TYPING_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color"];
 const CARRIED_LIST_BLOCK_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color", "lineHeight"];
 const PERF_WARN_MS = 16;
@@ -148,6 +153,44 @@ const COLOR_PRESETS = [
   "#d9eefc"
 ];
 
+const defaultToolbarButtons = {
+  fontFamily: true,
+  fontSize: true,
+  lineSpacing: true,
+  undo: true,
+  redo: true,
+  bold: true,
+  italic: true,
+  underline: true,
+  strike: true,
+  bullet: true,
+  orderedList: true,
+  checklist: true,
+  table: true,
+  textColor: true,
+  background: true,
+  emoji: true
+};
+
+const toolbarButtonLabels = {
+  fontFamily: "글씨체",
+  fontSize: "크기",
+  lineSpacing: "줄간격",
+  undo: "실행취소",
+  redo: "다시실행",
+  bold: "굵게",
+  italic: "기울임",
+  underline: "밑줄",
+  strike: "취소선",
+  bullet: "목록",
+  orderedList: "번호목록",
+  checklist: "체크",
+  table: "표",
+  textColor: "글씨 색",
+  background: "배경",
+  emoji: "이모티콘"
+};
+
 const defaultShellSettings = {
   dockEdge: "right",
   visibilityMode: "peek",
@@ -183,7 +226,9 @@ const defaultAppPrefs = {
   welcomeMemoApplied: true,
   initialSingleMemoApplied: true,
   recentTextColors: [],
-  customEmojiImages: []
+  customEmojiImages: [],
+  opacityControlsEnabled: true,
+  toolbarButtons: { ...defaultToolbarButtons }
 };
 
 function createId() {
@@ -219,6 +264,8 @@ function createMemo(index = 0, defaults = defaultMemoDefaults) {
     backgroundCoverage: 1,
     backgroundPositionX: 0.5,
     backgroundPositionY: 0.5,
+    attachments: [],
+    reminders: [],
     html: "",
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -256,6 +303,7 @@ let state = loadState();
 let expanded = false;
 let saveTimer = null;
 let historyTimer = null;
+let reminderSyncTimer = null;
 let lastSavedStateJson = "";
 let draggingHandle = false;
 let systemFonts = [DEFAULT_FONT_FAMILY, "GulimChe", "Malgun Gothic", "Arial", "Calibri", "Consolas"];
@@ -281,6 +329,7 @@ let tableSelectionState = null;
 let tableDragSelectState = null;
 let lastRenderedTableSelection = { table: null, cells: new Set(), activeCell: null };
 let detachedMemoPlacements = new Map();
+let editingReminderId = null;
 let pendingNudgeDelta = 0;
 let nudgeFrame = null;
 let railPositionDragState = null;
@@ -300,6 +349,22 @@ const memoListPanel = document.getElementById("memoListPanel");
 const closeMemoListButton = document.getElementById("closeMemoListButton");
 const allMemoList = document.getElementById("allMemoList");
 const allMemoListStatus = document.getElementById("allMemoListStatus");
+const attachmentButton = document.getElementById("attachmentButton");
+const attachmentCountBadge = document.getElementById("attachmentCountBadge");
+const attachmentPanel = document.getElementById("attachmentPanel");
+const addAttachmentButton = document.getElementById("addAttachmentButton");
+const attachmentList = document.getElementById("attachmentList");
+const attachmentStatus = document.getElementById("attachmentStatus");
+const reminderButton = document.getElementById("reminderButton");
+const reminderCountBadge = document.getElementById("reminderCountBadge");
+const reminderPanel = document.getElementById("reminderPanel");
+const reminderTitleInput = document.getElementById("reminderTitleInput");
+const reminderBodyInput = document.getElementById("reminderBodyInput");
+const reminderDateTimeInput = document.getElementById("reminderDateTimeInput");
+const reminderRepeatSelect = document.getElementById("reminderRepeatSelect");
+const addReminderButton = document.getElementById("addReminderButton");
+const reminderList = document.getElementById("reminderList");
+const reminderStatus = document.getElementById("reminderStatus");
 const memoSearchPanel = document.getElementById("memoSearchPanel");
 const closeMemoSearchButton = document.getElementById("closeMemoSearchButton");
 const memoSearchInput = document.getElementById("memoSearchInput");
@@ -344,6 +409,7 @@ const textColorPalette = document.getElementById("textColorPalette");
 const emojiButton = document.getElementById("emojiButton");
 const emojiPalette = document.getElementById("emojiPalette");
 const backgroundButton = document.getElementById("backgroundButton");
+const linkButton = document.getElementById("linkButton");
 const backgroundCropper = document.getElementById("backgroundCropper");
 const cropperTitle = document.getElementById("cropperTitle");
 const cropperStage = document.getElementById("cropperStage");
@@ -373,6 +439,7 @@ const commonFontFamilySelect = document.getElementById("commonFontFamilySelect")
 const commonFontSizeSelect = document.getElementById("commonFontSizeSelect");
 const defaultFontSizeSelect = document.getElementById("defaultFontSizeSelect");
 const defaultLineSpacingSelect = document.getElementById("defaultLineSpacingSelect");
+const opacityControlsEnabledInput = document.getElementById("opacityControlsEnabledInput");
 const importFontButton = document.getElementById("importFontButton");
 const cycleShortcutInput = document.getElementById("cycleShortcutInput");
 const hideShortcutInput = document.getElementById("hideShortcutInput");
@@ -391,6 +458,7 @@ const importDataButton = document.getElementById("importDataButton");
 const resetSettingsButton = document.getElementById("resetSettingsButton");
 const importEmojiImageButton = document.getElementById("importEmojiImageButton");
 const customEmojiList = document.getElementById("customEmojiList");
+const toolbarButtonSettingsList = document.getElementById("toolbarButtonSettingsList");
 const footerOpacityInput = document.getElementById("footerOpacityInput");
 const footerOpacityValue = document.getElementById("footerOpacityValue");
 const launchGuide = document.getElementById("launchGuide");
@@ -441,6 +509,8 @@ function migrateLegacyState(raw) {
         backgroundCoverage: normalizeBackgroundCoverage(item.backgroundCoverage),
         backgroundPositionX: normalizeBackgroundPosition(item.backgroundPositionX),
         backgroundPositionY: normalizeBackgroundPosition(item.backgroundPositionY),
+        attachments: normalizeAttachments(item.attachments),
+        reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -483,6 +553,8 @@ function normalizeState(raw) {
         backgroundCoverage: normalizeBackgroundCoverage(item.backgroundCoverage),
         backgroundPositionX: normalizeBackgroundPosition(item.backgroundPositionX),
         backgroundPositionY: normalizeBackgroundPosition(item.backgroundPositionY),
+        attachments: normalizeAttachments(item.attachments),
+        reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
         createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
         updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
@@ -572,6 +644,89 @@ function normalizeBackgroundPosition(value) {
 
 function normalizeAssetUrl(value) {
   return typeof value === "string" && /^(file|https?|data):/i.test(value.trim()) ? value.trim() : "";
+}
+
+function normalizeAttachment(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  const storedPath = typeof value.storedPath === "string" && value.storedPath.trim() ? value.storedPath.trim() : "";
+  if (!storedPath) return null;
+  const name = typeof value.name === "string" && value.name.trim() ? value.name.trim().slice(0, 180) : "첨부파일";
+  const ext = typeof value.ext === "string" ? value.ext.trim().replace(/^\./, "").toLowerCase().slice(0, 20) : "";
+  const size = Number(value.size);
+  return {
+    id: typeof value.id === "string" && value.id ? value.id : createId(),
+    name,
+    ext,
+    size: Number.isFinite(size) && size >= 0 ? Math.round(size) : 0,
+    storedPath,
+    url: normalizeAssetUrl(value.url),
+    createdAt: Number.isFinite(Number(value.createdAt)) ? Number(value.createdAt) : Date.now()
+  };
+}
+
+function normalizeAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map(normalizeAttachment)
+    .filter((item) => {
+      if (!item || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+}
+
+function normalizeReminderRepeat(value) {
+  return REMINDER_REPEAT_OPTIONS.includes(value) ? value : "none";
+}
+
+function normalizeReminderFireTimeValue(value) {
+  const date = new Date(Number(value));
+  if (!Number.isFinite(date.getTime())) return NaN;
+  date.setSeconds(0, 0);
+  return date.getTime();
+}
+
+function normalizeReminder(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  const scheduledAt = normalizeReminderFireTimeValue(value.scheduledAt);
+  const nextFireAt = normalizeReminderFireTimeValue(value.nextFireAt);
+  const baseTime = Number.isFinite(scheduledAt) ? scheduledAt : nextFireAt;
+  if (!Number.isFinite(baseTime)) return null;
+  return {
+    id: typeof value.id === "string" && value.id ? value.id : createId(),
+    title: typeof value.title === "string" && value.title.trim() ? value.title.trim().slice(0, 80) : "메모 알림",
+    body: typeof value.body === "string" ? value.body.trim().slice(0, 240) : "",
+    scheduledAt: baseTime,
+    repeat: normalizeReminderRepeat(value.repeat),
+    nextFireAt: Number.isFinite(nextFireAt) ? nextFireAt : baseTime,
+    lastFiredAt: Number.isFinite(Number(value.lastFiredAt)) ? Number(value.lastFiredAt) : null,
+    enabled: value.enabled !== false,
+    createdAt: Number.isFinite(Number(value.createdAt)) ? Number(value.createdAt) : Date.now()
+  };
+}
+
+function normalizeReminders(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const seenActiveSlots = new Set();
+  return value
+    .map(normalizeReminder)
+    .filter((item) => {
+      if (!item || seen.has(item.id)) return false;
+      seen.add(item.id);
+      if (item.enabled) {
+        const slotKey = String(item.nextFireAt);
+        if (seenActiveSlots.has(slotKey)) return false;
+        seenActiveSlots.add(slotKey);
+      }
+      return true;
+    });
+}
+
+function normalizeToolbarButtons(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(Object.keys(defaultToolbarButtons).map((key) => [key, source[key] !== false]));
 }
 
 function normalizeBackgroundCrop(value) {
@@ -724,7 +879,9 @@ function normalizeAppPrefs(value = {}) {
     welcomeMemoApplied: true,
     initialSingleMemoApplied: true,
     recentTextColors: normalizeTextColorList(value.recentTextColors),
-    customEmojiImages: normalizeCustomEmojiImages(value.customEmojiImages)
+    customEmojiImages: normalizeCustomEmojiImages(value.customEmojiImages),
+    opacityControlsEnabled: value.opacityControlsEnabled !== false,
+    toolbarButtons: normalizeToolbarButtons(value.toolbarButtons)
   };
 }
 
@@ -807,6 +964,15 @@ function syncToolbarVisibility() {
     toolbarToggleButton.title = collapsed ? "서식 도구 보이기" : "서식 도구 숨기기";
     toolbarToggleButton.setAttribute("aria-pressed", String(!collapsed));
   }
+  applyToolbarButtonVisibility();
+}
+
+function applyToolbarButtonVisibility() {
+  const buttons = normalizeToolbarButtons(state.prefs?.toolbarButtons);
+  document.querySelectorAll(".toolbar [data-toolbar-key]").forEach((element) => {
+    const key = element.dataset.toolbarKey;
+    element.classList.toggle("toolbar-item-hidden", buttons[key] === false);
+  });
 }
 
 function syncAlwaysOnTopControls() {
@@ -1100,10 +1266,37 @@ function formatOpacityPercent(value) {
   return `${Math.round(normalizeOpacity(value) * 100)}%`;
 }
 
+function opacityControlsEnabled() {
+  return state.prefs?.opacityControlsEnabled !== false;
+}
+
+function syncOpacityControlVisibility() {
+  const enabled = opacityControlsEnabled();
+  appShell?.classList.toggle("opacity-controls-disabled", !enabled);
+  if (opacityControlsEnabledInput) opacityControlsEnabledInput.checked = enabled;
+}
+
+function setOpacityControlsEnabled(enabled) {
+  state.prefs = normalizeAppPrefs({
+    ...state.prefs,
+    opacityControlsEnabled: enabled
+  });
+  const memo = activeMemo();
+  if (memo) {
+    applyMemoTheme(memo);
+    syncBackgroundControls(memo);
+  } else {
+    syncOpacityControlVisibility();
+  }
+  if (appShell?.classList.contains("settings-open")) renderIndexManager();
+  refreshDetachedMemoWindows();
+  saveState();
+}
+
 function backgroundTransparencyState(memo) {
   const color = normalizeHexColor(memo?.color, "#fff4b8");
   const backgroundImage = normalizeAssetUrl(memo?.backgroundImage);
-  const transparency = normalizeOpacity(memo?.backgroundOpacity);
+  const transparency = opacityControlsEnabled() ? normalizeOpacity(memo?.backgroundOpacity) : 0;
   const coverage = backgroundImage ? normalizeBackgroundCoverage(memo?.backgroundCoverage) : 1;
   return {
     color,
@@ -1129,7 +1322,78 @@ function hasMemoBackground(memo) {
 }
 
 function syncBackgroundControls(memo) {
+  syncOpacityControlVisibility();
   syncFooterOpacity(memo?.backgroundOpacity);
+}
+
+function allReminderPayloads() {
+  const now = Date.now();
+  return state.indexes.flatMap((memo) =>
+    normalizeReminders(memo.reminders)
+      .filter((reminder) => reminder.enabled && Number.isFinite(Number(reminder.nextFireAt)))
+      .map((reminder) => ({
+        ...reminder,
+        memoId: memo.id,
+        memoTitle: memo.title,
+        nextFireAt: Number(reminder.nextFireAt) || now
+      }))
+  );
+}
+
+function syncRemindersToMain() {
+  if (!window.memoEdge?.syncReminders) return;
+  window.memoEdge.syncReminders(allReminderPayloads()).catch(() => {});
+}
+
+function scheduleReminderSync() {
+  if (reminderSyncTimer) clearTimeout(reminderSyncTimer);
+  reminderSyncTimer = setTimeout(() => {
+    reminderSyncTimer = null;
+    syncRemindersToMain();
+  }, 250);
+}
+
+function nextRepeatedFireAt(reminder, fromTime = Date.now()) {
+  const repeat = normalizeReminderRepeat(reminder?.repeat);
+  if (repeat === "none") return null;
+  const next = new Date(Number(reminder.nextFireAt || reminder.scheduledAt));
+  if (!Number.isFinite(next.getTime())) return null;
+  while (next.getTime() <= fromTime) {
+    if (repeat === "daily") next.setDate(next.getDate() + 1);
+    else if (repeat === "weekly") next.setDate(next.getDate() + 7);
+    else if (repeat === "monthly") next.setMonth(next.getMonth() + 1);
+    else return null;
+  }
+  return next.getTime();
+}
+
+function reminderGroupKey(reminder) {
+  if (reminder?.enabled) return "upcoming";
+  const repeat = normalizeReminderRepeat(reminder?.repeat);
+  const hasFired = Number.isFinite(Number(reminder?.lastFiredAt));
+  const fireTime = Number(reminder?.nextFireAt);
+  if (repeat === "none" && hasFired && Number.isFinite(fireTime) && fireTime <= Date.now()) return "expired";
+  return "disabled";
+}
+
+function groupedReminders(reminders = []) {
+  const groups = [
+    { key: "upcoming", title: "울릴 알림", items: [] },
+    { key: "expired", title: "만료된 알림", items: [] },
+    { key: "disabled", title: "꺼진 알림", items: [] }
+  ];
+  const groupMap = new Map(groups.map((group) => [group.key, group]));
+  reminders.forEach((reminder) => {
+    groupMap.get(reminderGroupKey(reminder))?.items.push(reminder);
+  });
+  groups.forEach((group) => {
+    group.items.sort((a, b) => {
+      const aTime = group.key === "expired" ? Number(a.lastFiredAt) || Number(a.nextFireAt) : Number(a.nextFireAt);
+      const bTime = group.key === "expired" ? Number(b.lastFiredAt) || Number(b.nextFireAt) : Number(b.nextFireAt);
+      return aTime - bTime;
+    });
+  });
+  return groups.filter((group) => group.items.length);
 }
 
 function saveState(options = {}) {
@@ -1142,6 +1406,7 @@ function saveState(options = {}) {
   if (nextStateJson !== lastSavedStateJson) {
     localStorage.setItem(STORAGE_KEY, nextStateJson);
     lastSavedStateJson = nextStateJson;
+    scheduleReminderSync();
   }
   saveStatus.textContent = "저장됨";
 }
@@ -1297,6 +1562,7 @@ function serializedEditorHtml() {
     const clone = editor.cloneNode(true);
     stripTransientTableSelection(clone);
     prepareChecklistItems(clone);
+    sanitizeLinks(clone);
     clone.querySelectorAll(".check-text").forEach((text) => {
       text.textContent = text.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
     });
@@ -1791,8 +2057,27 @@ function memoPayload(memo) {
     backgroundCoverage: normalizeBackgroundCoverage(memo.backgroundCoverage),
     backgroundPositionX: normalizeBackgroundPosition(memo.backgroundPositionX),
     backgroundPositionY: normalizeBackgroundPosition(memo.backgroundPositionY),
+    attachments: normalizeAttachments(memo.attachments),
+    reminders: normalizeReminders(memo.reminders),
+    opacityControlsEnabled: opacityControlsEnabled(),
+    toolbarButtons: normalizeToolbarButtons(state.prefs?.toolbarButtons),
     html: memo.html || ""
   };
+}
+
+function refreshDetachedMemoWindow(id) {
+  if (!window.memoEdge.refreshDetachedToolbar) return;
+  window.memoEdge
+    .refreshDetachedToolbar({
+      id,
+      toolbarButtons: normalizeToolbarButtons(state.prefs?.toolbarButtons),
+      opacityControlsEnabled: opacityControlsEnabled()
+    })
+    .catch(() => {});
+}
+
+function refreshDetachedMemoWindows() {
+  detachedMemoPlacements.forEach((_, id) => refreshDetachedMemoWindow(id));
 }
 
 async function nudgeShellPosition(delta) {
@@ -1908,6 +2193,8 @@ function applyDetachedMemoUpdate(payload) {
   memo.backgroundTop = normalizeBackgroundTop(payload.backgroundTop, memo.backgroundCoverage);
   memo.backgroundPositionX = normalizeBackgroundPosition(payload.backgroundPositionX);
   memo.backgroundPositionY = normalizeBackgroundPosition(payload.backgroundPositionY);
+  if (Array.isArray(payload.attachments)) memo.attachments = normalizeAttachments(payload.attachments);
+  if (Array.isArray(payload.reminders)) memo.reminders = normalizeReminders(payload.reminders);
   memo.html = typeof payload.html === "string" ? payload.html : memo.html;
   memo.updatedAt = Date.now();
 
@@ -1921,6 +2208,8 @@ function applyDetachedMemoUpdate(payload) {
       activeLabel.textContent = memo.title;
       applyMemoTheme(memo);
       applyMemoTypography(memo);
+      syncAttachmentControls(memo);
+      syncReminderControls(memo);
     }
   }
   saveState();
@@ -1965,6 +2254,8 @@ function renderActiveMemo() {
   activeTitleInput.value = memo.title || "메모";
   activeSubtitle.textContent = "";
   syncBackgroundControls(memo);
+  syncAttachmentControls(memo);
+  syncReminderControls(memo);
   setTablePickerOpen(false);
   setTableToolsOpen(false);
   clearTableSelection();
@@ -1995,6 +2286,8 @@ function setMemoListOpen(open) {
   allMemosButton.setAttribute("aria-expanded", String(Boolean(open)));
   if (open) {
     closeMemoSearch();
+    setAttachmentPanelOpen(false);
+    setReminderPanelOpen(false);
     renderAllMemoList();
   }
 }
@@ -2007,6 +2300,409 @@ function setAllMemoListStatus(message, timeout = 2500) {
       if (allMemoListStatus.textContent === message) allMemoListStatus.textContent = "";
     }, timeout);
   }
+}
+
+function setAttachmentStatus(message, timeout = 2500) {
+  if (!attachmentStatus) return;
+  attachmentStatus.textContent = message || "";
+  if (message && timeout) {
+    setTimeout(() => {
+      if (attachmentStatus.textContent === message) attachmentStatus.textContent = "";
+    }, timeout);
+  }
+}
+
+function setReminderStatus(message, timeout = 2500) {
+  if (!reminderStatus) return;
+  reminderStatus.textContent = message || "";
+  if (message && timeout) {
+    setTimeout(() => {
+      if (reminderStatus.textContent === message) reminderStatus.textContent = "";
+    }, timeout);
+  }
+}
+
+function formatAttachmentSize(size) {
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? Math.round(value) : Math.round(value * 10) / 10} ${units[unitIndex]}`;
+}
+
+function formatDateTime(value) {
+  const date = new Date(Number(value));
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleString("ko-KR", {
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function dateTimeInputValue(value) {
+  const date = new Date(Number(value));
+  if (!Number.isFinite(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function reminderFireTimeFromInput(value) {
+  const date = new Date(value || "");
+  if (!Number.isFinite(date.getTime())) return NaN;
+  date.setSeconds(0, 0);
+  return date.getTime();
+}
+
+function nextFutureReminderMinute(fromTime = Date.now()) {
+  const date = new Date(Number(fromTime));
+  if (!Number.isFinite(date.getTime())) return Date.now() + 60000;
+  date.setSeconds(0, 0);
+  date.setMinutes(date.getMinutes() + 1);
+  return date.getTime();
+}
+
+function repeatLabel(value) {
+  return {
+    none: "반복 없음",
+    daily: "매일",
+    weekly: "매주",
+    monthly: "매월"
+  }[normalizeReminderRepeat(value)];
+}
+
+function setAttachmentPanelOpen(open) {
+  if (!attachmentPanel || !attachmentButton) return;
+  attachmentPanel.classList.toggle("hidden", !open);
+  attachmentButton.classList.toggle("active", Boolean(open));
+  if (open) {
+    setReminderStatus("");
+    setMemoListOpen(false);
+    setMemoSearchOpen(false);
+    setReminderPanelOpen(false);
+    setTextColorPaletteOpen(false);
+    setTablePickerOpen(false);
+    setTableToolsOpen(false);
+    renderAttachmentPanel();
+  }
+}
+
+function setReminderPanelOpen(open) {
+  if (!reminderPanel || !reminderButton) return;
+  reminderPanel.classList.toggle("hidden", !open);
+  reminderButton.classList.toggle("active", Boolean(open));
+  if (open) {
+    setMemoListOpen(false);
+    setMemoSearchOpen(false);
+    setAttachmentPanelOpen(false);
+    setTextColorPaletteOpen(false);
+    setTablePickerOpen(false);
+    setTableToolsOpen(false);
+    if (!reminderDateTimeInput.value) reminderDateTimeInput.value = dateTimeInputValue(Date.now() + 10 * 60 * 1000);
+    renderReminderPanel();
+  } else {
+    editingReminderId = null;
+    if (addReminderButton) addReminderButton.textContent = "등록";
+  }
+}
+
+function syncAttachmentControls(memo = activeMemo()) {
+  const count = normalizeAttachments(memo?.attachments).length;
+  if (attachmentCountBadge) {
+    attachmentCountBadge.textContent = String(count);
+    attachmentCountBadge.classList.toggle("hidden", count <= 0);
+  }
+  if (attachmentPanel && !attachmentPanel.classList.contains("hidden")) renderAttachmentPanel();
+}
+
+function syncReminderControls(memo = activeMemo()) {
+  const count = normalizeReminders(memo?.reminders).filter((item) => item.enabled).length;
+  if (reminderCountBadge) {
+    reminderCountBadge.textContent = String(count);
+    reminderCountBadge.classList.toggle("hidden", count <= 0);
+  }
+  if (reminderPanel && !reminderPanel.classList.contains("hidden")) renderReminderPanel();
+}
+
+function renderAttachmentPanel() {
+  const memo = activeMemo();
+  if (!attachmentList || !memo) return;
+  const attachments = normalizeAttachments(memo.attachments);
+  memo.attachments = attachments;
+  attachmentList.innerHTML = "";
+  if (!attachments.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint-text";
+    empty.append("첨부파일이 없습니다.", document.createElement("br"), "첨부파일 등록 시 별도파일로 생성되어 관리됩니다.");
+    attachmentList.appendChild(empty);
+    return;
+  }
+
+  attachments.forEach((attachment) => {
+    const item = document.createElement("div");
+    item.className = "attachment-item";
+    const info = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "attachment-name";
+    name.textContent = attachment.name;
+    const meta = document.createElement("div");
+    meta.className = "attachment-meta";
+    meta.textContent = `${formatAttachmentSize(attachment.size)} · ${formatDateTime(attachment.createdAt)}`;
+    info.append(name, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "attachment-actions";
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "small-button";
+    openButton.textContent = "열기";
+    openButton.addEventListener("click", () => openAttachment(attachment));
+    const revealButton = document.createElement("button");
+    revealButton.type = "button";
+    revealButton.className = "small-button";
+    revealButton.textContent = "위치";
+    revealButton.addEventListener("click", () => revealAttachment(attachment));
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "small-button danger";
+    removeButton.textContent = "삭제";
+    removeButton.addEventListener("click", () => removeAttachment(memo.id, attachment.id));
+    actions.append(openButton, revealButton, removeButton);
+    item.append(info, actions);
+    attachmentList.appendChild(item);
+  });
+}
+
+async function addAttachmentToActiveMemo() {
+  const memo = activeMemo();
+  if (!memo) return;
+  const result = await window.memoEdge.importAttachment?.(memo.id);
+  if (result?.canceled) return;
+  if (!result?.ok || !result.attachment) {
+    setAttachmentStatus(`첨부 추가 실패: ${result?.message || "알 수 없음"}`, 0);
+    return;
+  }
+  memo.attachments = normalizeAttachments([...(memo.attachments || []), result.attachment]);
+  memo.updatedAt = Date.now();
+  syncAttachmentControls(memo);
+  saveState();
+}
+
+async function openAttachment(attachment) {
+  const result = await window.memoEdge.openAttachment?.(attachment.storedPath);
+  if (!result?.ok) setAttachmentStatus(`파일 열기 실패: ${result?.message || "알 수 없음"}`, 0);
+}
+
+async function revealAttachment(attachment) {
+  const result = await window.memoEdge.revealAttachment?.(attachment.storedPath);
+  if (!result?.ok) setAttachmentStatus(`위치 열기 실패: ${result?.message || "알 수 없음"}`, 0);
+}
+
+async function removeAttachment(memoId, attachmentId) {
+  const memo = state.indexes.find((item) => item.id === memoId);
+  const attachment = normalizeAttachments(memo?.attachments).find((item) => item.id === attachmentId);
+  if (!memo || !attachment) return;
+  const result = await window.memoEdge.removeAttachment?.(attachment.storedPath);
+  if (!result?.ok) {
+    setAttachmentStatus(`첨부 삭제 실패: ${result?.message || "알 수 없음"}`, 0);
+    return;
+  }
+  memo.attachments = normalizeAttachments(memo.attachments).filter((item) => item.id !== attachmentId);
+  memo.updatedAt = Date.now();
+  syncAttachmentControls(memo);
+  saveState();
+}
+
+function renderReminderPanel() {
+  const memo = activeMemo();
+  if (!reminderList || !memo) return;
+  const reminders = normalizeReminders(memo.reminders);
+  memo.reminders = reminders;
+  reminderList.innerHTML = "";
+  if (!reminders.length) {
+    setReminderStatus("");
+    const empty = document.createElement("p");
+    empty.className = "hint-text";
+    empty.textContent = "등록된 알림이 없습니다.";
+    reminderList.appendChild(empty);
+    return;
+  }
+
+  groupedReminders(reminders).forEach((group) => {
+    const section = document.createElement("section");
+    section.className = "reminder-section";
+    const heading = document.createElement("h4");
+    heading.className = "reminder-section-title";
+    heading.textContent = `${group.title} ${group.items.length}`;
+    section.appendChild(heading);
+
+    group.items.forEach((reminder) => {
+      const item = document.createElement("div");
+      item.className = "reminder-item";
+      item.dataset.reminderState = group.key;
+      if (!reminder.enabled) item.classList.add("disabled");
+      const info = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "reminder-title";
+      title.textContent = reminder.title;
+      const meta = document.createElement("div");
+      meta.className = "reminder-meta";
+      const stateText =
+        group.key === "expired"
+          ? `만료 · ${formatDateTime(reminder.lastFiredAt || reminder.nextFireAt)}`
+          : group.key === "disabled"
+            ? "꺼짐"
+            : "예정";
+      meta.textContent = `${formatDateTime(reminder.nextFireAt)} · ${repeatLabel(reminder.repeat)} · ${stateText}`;
+      info.append(title, meta);
+
+      const actions = document.createElement("div");
+      actions.className = "reminder-actions";
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "small-button";
+      editButton.textContent = "수정";
+      editButton.addEventListener("click", () => editReminder(reminder.id));
+      const toggleButton = document.createElement("button");
+      toggleButton.type = "button";
+      toggleButton.className = "small-button";
+      toggleButton.textContent = reminder.enabled ? "끄기" : "켜기";
+      toggleButton.addEventListener("click", () => toggleReminder(reminder.id));
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "small-button danger";
+      removeButton.textContent = "삭제";
+      removeButton.addEventListener("click", () => removeReminder(reminder.id));
+      actions.append(editButton, toggleButton, removeButton);
+      item.append(info, actions);
+      section.appendChild(item);
+    });
+
+    reminderList.appendChild(section);
+  });
+}
+
+function editReminder(reminderId) {
+  const memo = activeMemo();
+  const reminder = normalizeReminders(memo?.reminders).find((item) => item.id === reminderId);
+  if (!reminder) return;
+  setReminderStatus("");
+  editingReminderId = reminder.id;
+  reminderTitleInput.value = reminder.title;
+  reminderBodyInput.value = reminder.body;
+  reminderDateTimeInput.value = dateTimeInputValue(reminder.nextFireAt);
+  reminderRepeatSelect.value = normalizeReminderRepeat(reminder.repeat);
+  addReminderButton.textContent = "수정 저장";
+}
+
+function reminderFromForm(existingId = null) {
+  const scheduledAt = reminderFireTimeFromInput(reminderDateTimeInput.value);
+  if (!Number.isFinite(scheduledAt)) return null;
+  return normalizeReminder({
+    id: existingId || createId(),
+    title: reminderTitleInput.value,
+    body: reminderBodyInput.value,
+    scheduledAt,
+    nextFireAt: scheduledAt,
+    repeat: reminderRepeatSelect.value,
+    enabled: true,
+    createdAt: Date.now()
+  });
+}
+
+function clearReminderForm() {
+  editingReminderId = null;
+  reminderTitleInput.value = "";
+  reminderBodyInput.value = "";
+  reminderDateTimeInput.value = dateTimeInputValue(Date.now() + 10 * 60 * 1000);
+  reminderRepeatSelect.value = "none";
+  addReminderButton.textContent = "등록";
+  setReminderStatus("");
+}
+
+function addOrUpdateReminder() {
+  const memo = activeMemo();
+  if (!memo) return;
+  const reminder = reminderFromForm(editingReminderId);
+  if (!reminder) {
+    setReminderStatus("알림 일시를 입력해 주세요.", 0);
+    return;
+  }
+  if (reminder.nextFireAt <= Date.now()) {
+    setReminderStatus("현재 이후의 시간을 입력해 주세요.", 0);
+    return;
+  }
+  const reminders = normalizeReminders(memo.reminders);
+  if (!editingReminderId && reminders.some((item) => item.enabled && item.nextFireAt === reminder.nextFireAt)) {
+    setReminderStatus("같은 시간의 알림이 이미 있습니다.", 0);
+    return;
+  }
+  const next = editingReminderId
+    ? reminders.map((item) => (item.id === editingReminderId ? { ...item, ...reminder, createdAt: item.createdAt } : item))
+    : [...reminders, reminder];
+  memo.reminders = normalizeReminders(next);
+  memo.updatedAt = Date.now();
+  clearReminderForm();
+  syncReminderControls(memo);
+  saveState();
+}
+
+function toggleReminder(reminderId) {
+  const memo = activeMemo();
+  if (!memo) return;
+  setReminderStatus("");
+  memo.reminders = normalizeReminders(memo.reminders).map((item) =>
+    item.id === reminderId
+      ? { ...item, enabled: !item.enabled, nextFireAt: item.nextFireAt <= Date.now() ? nextFutureReminderMinute() : item.nextFireAt }
+      : item
+  );
+  syncReminderControls(memo);
+  saveState();
+}
+
+function removeReminder(reminderId) {
+  const memo = activeMemo();
+  if (!memo) return;
+  setReminderStatus("");
+  memo.reminders = normalizeReminders(memo.reminders).filter((item) => item.id !== reminderId);
+  syncReminderControls(memo);
+  saveState();
+}
+
+function handleReminderFired(payload = {}) {
+  const memo = state.indexes.find((item) => item.id === payload.memoId);
+  if (!memo) return;
+  const slotFireAt = normalizeReminderFireTimeValue(payload.slotFireAt);
+  memo.reminders = normalizeReminders(memo.reminders).map((reminder) => {
+    const matchesSlot = Number.isFinite(slotFireAt) && reminder.nextFireAt === slotFireAt;
+    if (reminder.id !== payload.reminderId && !matchesSlot) return reminder;
+    const firedAt = Number(payload.firedAt) || Date.now();
+    if (normalizeReminderRepeat(reminder.repeat) === "none") {
+      return { ...reminder, enabled: false, lastFiredAt: firedAt };
+    }
+    return {
+      ...reminder,
+      lastFiredAt: firedAt,
+      nextFireAt: nextRepeatedFireAt(reminder, firedAt) || reminder.nextFireAt
+    };
+  });
+  if (memo.id === state.activeId) syncReminderControls(memo);
+  saveState();
+}
+
+function openMemoFromReminder(payload = {}) {
+  const memoId = payload.memoId;
+  if (!state.indexes.some((memo) => memo.id === memoId)) return;
+  closeSettings();
+  selectMemo(memoId, { focusAtEnd: false });
+  setExpanded(true);
 }
 
 function renderAllMemoList() {
@@ -2042,6 +2738,13 @@ function renderAllMemoList() {
     toggleButton.title = isLastFloatingMemo ? "플로팅 메모는 최소 1개 필요" : isFloating ? "일반 메모로 변경" : "플로팅 메모로 변경";
     toggleButton.setAttribute("aria-pressed", String(isFloating));
 
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "all-memo-delete";
+    deleteButton.textContent = "삭제";
+    deleteButton.title = `${memo.title || `메모 ${index + 1}`} 삭제`;
+    deleteButton.setAttribute("aria-label", `${memo.title || `메모 ${index + 1}`} 삭제`);
+
     openButton.append(swatch, title);
     openButton.addEventListener("click", () => {
       selectMemo(memo.id);
@@ -2051,8 +2754,13 @@ function renderAllMemoList() {
     toggleButton.addEventListener("click", () => {
       setFloatingMemo(memo.id, !isFloating, { showLimitMessage: true });
     });
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteIndex(memo.id);
+    });
 
-    item.append(openButton, toggleButton);
+    item.append(openButton, toggleButton, deleteButton);
     allMemoList.appendChild(item);
   });
 }
@@ -3100,6 +3808,134 @@ function insertNodeAtSelection(node) {
 
   range.deleteContents();
   range.insertNode(node);
+}
+
+function normalizeLinkUrl(value) {
+  const raw = String(value || "")
+    .trim()
+    .replace(/^<+/, "")
+    .replace(/>+$/, "")
+    .replace(/[.,!?;:)\]\u3002\uff0c\uff01\uff1f\uff1b\uff1a]+$/u, "");
+  if (!raw) return "";
+  if (/^(https?:|mailto:)/i.test(raw)) return raw;
+  if (/^www\./i.test(raw)) return `https://${raw}`;
+  if (/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?$/i.test(raw)) {
+    return `https://${raw}`;
+  }
+  return "";
+}
+
+function textContainsAutoLink(value) {
+  return /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?)/i.test(String(value || ""));
+}
+
+function htmlContainsLink(value) {
+  return /<a\b[^>]*href\s*=/i.test(String(value || ""));
+}
+
+function sanitizeLinks(root = editor) {
+  root.querySelectorAll("a").forEach((link) => {
+    const href = normalizeLinkUrl(link.getAttribute("href") || link.textContent);
+    if (!href) {
+      link.replaceWith(...Array.from(link.childNodes));
+      return;
+    }
+    link.setAttribute("href", href);
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noreferrer");
+  });
+}
+
+function createLinkElement(text, href) {
+  const link = document.createElement("a");
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = text || href;
+  return link;
+}
+
+function editorRangeFromPoint(event) {
+  if (document.caretRangeFromPoint) return document.caretRangeFromPoint(event.clientX, event.clientY);
+  const position = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+  if (!position) return null;
+  const range = document.createRange();
+  range.setStart(position.offsetNode, position.offset);
+  range.collapse(true);
+  return range;
+}
+
+function insertTextWithAutoLinks(text) {
+  const fragment = document.createDocumentFragment();
+  const pattern = /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?)/gi;
+  let lastIndex = 0;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const before = text.slice(lastIndex, match.index);
+    if (before) fragment.appendChild(document.createTextNode(before));
+    const token = match[0];
+    const trimmedToken = token.replace(/[.,!?;:)\]\u3002\uff0c\uff01\uff1f\uff1b\uff1a]+$/u, "");
+    const trailing = token.slice(trimmedToken.length);
+    const href = normalizeLinkUrl(trimmedToken);
+    fragment.appendChild(href ? createLinkElement(trimmedToken, href) : document.createTextNode(token));
+    if (href && trailing) fragment.appendChild(document.createTextNode(trailing));
+    lastIndex = match.index + match[0].length;
+  }
+  const after = text.slice(lastIndex);
+  if (after) fragment.appendChild(document.createTextNode(after));
+  insertNodeAtSelection(fragment);
+  persistEditor();
+  pushEditorHistory();
+}
+
+function insertHtmlWithSafeLinks(html) {
+  const template = document.createElement("template");
+  template.innerHTML = String(html || "");
+  template.content.querySelectorAll("script, style, iframe, object, embed, meta, link").forEach((node) => node.remove());
+  template.content.querySelectorAll("*").forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      if (/^on/i.test(attribute.name)) element.removeAttribute(attribute.name);
+    });
+  });
+  sanitizeLinks(template.content);
+  insertNodeAtSelection(template.content);
+  persistEditor();
+  pushEditorHistory();
+}
+
+function insertOrUpdateLink() {
+  restoreEditorSelection();
+  const range = window.getSelection()?.rangeCount ? window.getSelection().getRangeAt(0) : null;
+  const selectedText = range && selectionBelongsToEditor(range) ? range.toString().trim() : "";
+  const selectedHref = normalizeLinkUrl(selectedText);
+  const input = window.prompt("연결할 주소를 입력하세요.", selectedHref || "");
+  const href = normalizeLinkUrl(input);
+  if (!href) return;
+  const link = createLinkElement(selectedText || href, href);
+  if (!range || !selectionBelongsToEditor(range) || range.collapsed) {
+    insertNodeAtSelection(link);
+  } else {
+    range.deleteContents();
+    range.insertNode(link);
+  }
+  const nextRange = document.createRange();
+  nextRange.setStartAfter(link);
+  nextRange.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+  savedEditorRange = nextRange.cloneRange();
+  persistEditor();
+  pushEditorHistory();
+}
+
+function handleEditorLinkClick(event) {
+  const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+  if (!link || !editor.contains(link)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const href = normalizeLinkUrl(link.getAttribute("href"));
+  if (href) window.memoEdge.openExternal?.(href);
 }
 
 function insertChecklist() {
@@ -4352,6 +5188,35 @@ function displayLabel(display) {
   return `${display.label} · ${width}×${height}`;
 }
 
+function renderToolbarButtonSettings() {
+  if (!toolbarButtonSettingsList) return;
+  const buttons = normalizeToolbarButtons(state.prefs?.toolbarButtons);
+  toolbarButtonSettingsList.innerHTML = "";
+  Object.entries(toolbarButtonLabels).forEach(([key, label]) => {
+    const row = document.createElement("label");
+    row.className = "toolbar-button-setting";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.toolbarKey = key;
+    input.checked = buttons[key] !== false;
+    input.addEventListener("change", () => {
+      state.prefs = normalizeAppPrefs({
+        ...state.prefs,
+        toolbarButtons: {
+          ...buttons,
+          [key]: input.checked
+        }
+      });
+      applyToolbarButtonVisibility();
+      saveState();
+      refreshDetachedMemoWindows();
+      renderToolbarButtonSettings();
+    });
+    row.append(input, document.createTextNode(label));
+    toolbarButtonSettingsList.appendChild(row);
+  });
+}
+
 async function fillSettingsForm() {
   const shellState = await window.memoEdge.getShellState();
   state.shell = normalizeShellSettings({ ...state.shell, ...(shellState.settings || {}) });
@@ -4389,6 +5254,8 @@ async function fillSettingsForm() {
   applyCommonTypography();
   populateFontFamilySelect(commonFontFamilySelect, state.prefs?.commonFontFamily || DEFAULT_FONT_FAMILY);
   if (commonFontSizeSelect) commonFontSizeSelect.value = String(normalizeCommonFontSize(state.prefs?.commonFontSize));
+  if (opacityControlsEnabledInput) opacityControlsEnabledInput.checked = opacityControlsEnabled();
+  syncOpacityControlVisibility();
   populateFontFamilySelect(defaultFontFamilySelect, state.memoDefaults.fontFamily);
   populateFontSizeSelect(defaultFontSizeSelect, state.memoDefaults.fontSize);
   populateLineSpacingSelect(defaultLineSpacingSelect, state.memoDefaults.lineSpacing);
@@ -4404,6 +5271,7 @@ async function fillSettingsForm() {
   await ensureStartupEnabled();
 
   renderCustomEmojiSettings();
+  renderToolbarButtonSettings();
   renderIndexManager();
 }
 
@@ -4589,7 +5457,9 @@ function renderIndexManager() {
       })
     );
 
-    backgroundRow.append(backgroundButton, opacityLabel, clearBackgroundButton);
+    backgroundRow.append(backgroundButton);
+    if (opacityControlsEnabled()) backgroundRow.appendChild(opacityLabel);
+    backgroundRow.appendChild(clearBackgroundButton);
 
     row.append(main, colorRow, typeRow, backgroundRow);
     indexManagerList.appendChild(row);
@@ -5242,7 +6112,22 @@ async function handleEditorPaste(event) {
   }
 
   const file = imageFileFromPaste(event);
-  if (!file) return;
+  if (!file) {
+    const html = event.clipboardData?.getData("text/html") || "";
+    const plainText = event.clipboardData?.getData("text/plain") || "";
+    if (htmlContainsLink(html)) {
+      event.preventDefault();
+      restoreEditorSelection();
+      insertHtmlWithSafeLinks(html);
+      return;
+    }
+    if (textContainsAutoLink(plainText)) {
+      event.preventDefault();
+      restoreEditorSelection();
+      insertTextWithAutoLinks(plainText);
+    }
+    return;
+  }
   event.preventDefault();
   try {
     const sourceUrl = await savePastedImageFile(file);
@@ -5386,10 +6271,53 @@ function clearBackgroundForMemo(id) {
   closeBackgroundCropper();
 }
 
-function deleteIndex(id) {
+function memoAttachmentCount(memo) {
+  return normalizeAttachments(memo?.attachments).length;
+}
+
+function memoReminderCount(memo) {
+  return normalizeReminders(memo?.reminders).length;
+}
+
+function memoDeleteConfirmMessage(memo) {
+  const hasAttachments = memoAttachmentCount(memo) > 0;
+  const hasReminders = memoReminderCount(memo) > 0;
+  if (hasAttachments && hasReminders) return ATTACHMENT_AND_REMINDER_DELETE_WARNING;
+  if (hasAttachments) return ATTACHMENT_DELETE_WARNING;
+  if (hasReminders) return REMINDER_DELETE_WARNING;
+  return state.indexes.length <= 1 ? "" : `"${memo.title}" 메모를 삭제할까요?`;
+}
+
+function reportAttachmentFolderDeleteFailure(result) {
+  const message = `첨부파일 삭제 실패: ${result?.message || "알 수 없음"}`;
+  setSettingsStatus(message, 0);
+  setAllMemoListStatus(message, 0);
+  setAttachmentStatus(message, 0);
+  window.alert(message);
+}
+
+async function removeMemoAttachmentsBeforeDelete(memo) {
+  if (!window.memoEdge.removeMemoAttachmentFolder) return memoAttachmentCount(memo) <= 0;
+  const result = await window.memoEdge.removeMemoAttachmentFolder?.(memo.id);
+  if (!result?.ok) {
+    reportAttachmentFolderDeleteFailure(result);
+    return false;
+  }
+  return true;
+}
+
+async function deleteIndex(id) {
+  const deleteTarget = state.indexes.find((memo) => memo.id === id);
+  if (!deleteTarget) return;
+
+  const confirmMessage = memoDeleteConfirmMessage(deleteTarget);
+  if (confirmMessage && !window.confirm(confirmMessage)) return;
+
+  if (!(await removeMemoAttachmentsBeforeDelete(deleteTarget))) return;
   detachedMemoPlacements.delete(id);
+
   if (state.indexes.length <= 1) {
-    const memo = state.indexes[0];
+    const memo = deleteTarget;
     memo.title = "메모 1";
     memo.html = "";
     memo.color = COLOR_PRESETS[0];
@@ -5404,24 +6332,24 @@ function deleteIndex(id) {
     memo.backgroundCoverage = 1;
     memo.backgroundPositionX = 0.5;
     memo.backgroundPositionY = 0.5;
+    memo.attachments = [];
+    memo.reminders = [];
     state.activeId = memo.id;
     state.floatingIds = [memo.id];
     renderActiveMemo();
     saveState();
+    syncRemindersToMain();
     return;
   }
-
-  const deleteTarget = state.indexes.find((memo) => memo.id === id);
-  if (!deleteTarget) return;
-  const confirmed = window.confirm(`"${deleteTarget.title}" 메모를 삭제할까요?`);
-  if (!confirmed) return;
 
   state.indexes = state.indexes.filter((memo) => memo.id !== id);
   state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
   if (!state.floatingIds.length) state.floatingIds = [state.indexes[0].id];
   if (state.activeId === id) state.activeId = state.floatingIds[0];
+  window.memoEdge.attachDetachedMemo?.(id)?.catch?.(() => {});
   renderActiveMemo();
   saveState();
+  syncRemindersToMain();
 }
 
 async function applySettings() {
@@ -5439,6 +6367,7 @@ async function applySettings() {
     ...state.prefs,
     commonFontFamily: commonFontFamilySelect?.value || DEFAULT_FONT_FAMILY,
     commonFontSize: commonFontSizeSelect?.value || DEFAULT_COMMON_FONT_SIZE,
+    opacityControlsEnabled: opacityControlsEnabledInput?.checked !== false,
     showLaunchGuideOnStartup: startupGuideInput.checked,
     startupDefaultApplied: true,
     startupUserChoiceSet: false
@@ -5475,6 +6404,12 @@ async function applySettings() {
   state.shell.panelHeight = normalizePanelHeight(state.shell.panelHeight);
   syncShellLayoutClasses();
   applyCommonTypography();
+  const memo = activeMemo();
+  if (memo) {
+    applyMemoTheme(memo);
+    syncBackgroundControls(memo);
+  }
+  refreshDetachedMemoWindows();
   activeSubtitle.textContent = "";
   saveState();
 
@@ -5550,6 +6485,7 @@ editor.addEventListener("input", () => {
   scheduleTableToolsRefresh();
 });
 editor.addEventListener("keydown", handleEditorKeydown);
+editor.addEventListener("click", handleEditorLinkClick);
 editor.addEventListener("pointerdown", beginTableCellSelection);
 editor.addEventListener("keyup", () => {
   rememberEditorSelection();
@@ -5621,6 +6557,15 @@ document.addEventListener("pointerdown", (event) => {
 });
 collapseButton.addEventListener("click", () => setExpanded(false));
 toolbarToggleButton?.addEventListener("click", toggleToolbarVisibility);
+attachmentButton?.addEventListener("click", () => setAttachmentPanelOpen(attachmentPanel?.classList.contains("hidden")));
+reminderButton?.addEventListener("click", () => setReminderPanelOpen(reminderPanel?.classList.contains("hidden")));
+addAttachmentButton?.addEventListener("click", addAttachmentToActiveMemo);
+addReminderButton?.addEventListener("click", addOrUpdateReminder);
+[reminderTitleInput, reminderBodyInput, reminderDateTimeInput, reminderRepeatSelect].forEach((control) => {
+  control?.addEventListener("input", () => setReminderStatus(""));
+  control?.addEventListener("change", () => setReminderStatus(""));
+});
+linkButton?.addEventListener("click", insertOrUpdateLink);
 settingsButton.addEventListener("click", openSettings);
 topmostToggleButton?.addEventListener("click", () => updateAlwaysOnTopSetting(!(state.shell?.alwaysOnTop !== false)));
 closeSettingsButton.addEventListener("click", closeSettings);
@@ -5648,6 +6593,9 @@ memoSearchInput?.addEventListener("keydown", (event) => {
 addSettingsIndexButton.addEventListener("click", addIndex);
 importFontButton?.addEventListener("click", importFontForApp);
 importEmojiImageButton?.addEventListener("click", importEmojiImageForApp);
+opacityControlsEnabledInput?.addEventListener("change", () => {
+  setOpacityControlsEnabled(opacityControlsEnabledInput.checked);
+});
 [commonFontFamilySelect, defaultFontFamilySelect].forEach((select) => {
   select?.addEventListener("change", () => {
     select.style.fontFamily = fontFamilyCss(select.value);
@@ -5827,6 +6775,8 @@ window.memoEdge.onExpandedChanged((nextExpanded) => {
 window.memoEdge.onCycleFloating(cycleFloatingMemo);
 window.memoEdge.onOpenEmoji?.(openEmojiFromShortcut);
 window.memoEdge.onOpenSettings(openSettings);
+window.memoEdge.onReminderFired?.(handleReminderFired);
+window.memoEdge.onReminderOpenMemo?.(openMemoFromReminder);
 window.memoEdge.onDetachedMemoUpdated?.(applyDetachedMemoUpdate);
 window.memoEdge.onDetachedMemoAttached?.((id) => reattachDetachedMemo(id));
 

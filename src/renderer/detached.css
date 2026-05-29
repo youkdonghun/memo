@@ -159,6 +159,111 @@ button:not(:disabled):active {
   flex-wrap: wrap;
 }
 
+.detached-side-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
+  background: color-mix(in srgb, var(--note-bg) 78%, #ffffff);
+}
+
+.detached-side-panel:not(.hidden) {
+  animation: surface-enter var(--motion-fast) var(--motion-ease) both;
+}
+
+.detached-side-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.attachment-list,
+.reminder-list {
+  display: grid;
+  gap: 6px;
+  max-height: 130px;
+  overflow: auto;
+}
+
+.reminder-section {
+  display: grid;
+  gap: 5px;
+}
+
+.reminder-section-title {
+  margin: 4px 0 0;
+  color: var(--note-text);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.reminder-section:first-child .reminder-section-title {
+  margin-top: 0;
+}
+
+.attachment-item,
+.reminder-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--note-text) 14%, transparent);
+  border-radius: var(--radius-control);
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.attachment-name,
+.reminder-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta,
+.reminder-meta,
+.hint-text {
+  color: color-mix(in srgb, var(--note-text) 62%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.attachment-actions,
+.reminder-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.attachment-actions .small-button,
+.reminder-actions .small-button {
+  height: 24px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.reminder-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.reminder-form input,
+.reminder-form select {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--note-text) 14%, transparent);
+  border-radius: var(--radius-compact);
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--note-text);
+}
+
 .detached-footer {
   min-height: 34px;
   border-top: 1px solid color-mix(in srgb, var(--note-text) 15%, transparent);
@@ -203,6 +308,17 @@ button:not(:disabled):active {
   background: rgba(255, 255, 255, 0.62);
   color: var(--note-text);
   cursor: pointer;
+}
+
+.compact-action-button {
+  min-width: 44px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.toolbar-item-hidden {
+  display: none !important;
 }
 
 .small-button {
@@ -584,6 +700,13 @@ input.toolbar-line-select {
 
 .detached-editor * {
   font-family: inherit;
+}
+
+.detached-editor a {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .memo-image-line {

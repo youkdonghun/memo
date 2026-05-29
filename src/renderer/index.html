@@ -26,53 +26,61 @@
             <p id="activeSubtitle" class="active-subtitle"></p>
           </div>
           <div class="header-actions">
-            <button id="toolbarToggleButton" class="icon-button" type="button" title="서식 도구">Aa</button>
             <button id="topmostToggleButton" class="icon-button topmost-toggle-button active" type="button" title="항상 맨 앞에 표시" aria-label="항상 맨 앞에 표시" aria-pressed="true">앞</button>
             <button id="settingsButton" class="icon-button" type="button" title="설정">⚙</button>
             <button id="collapseButton" class="icon-button" type="button" title="접기">›</button>
+            <button id="toolbarToggleButton" class="icon-button" type="button" title="서식 도구">Aa</button>
+            <button id="attachmentButton" class="icon-button badge-button" type="button" title="첨부파일" aria-label="첨부파일">
+              <span aria-hidden="true">📎</span>
+              <span id="attachmentCountBadge" class="count-badge hidden">0</span>
+            </button>
+            <button id="reminderButton" class="icon-button badge-button" type="button" title="알림" aria-label="알림">
+              <span aria-hidden="true">⏰</span>
+              <span id="reminderCountBadge" class="count-badge hidden">0</span>
+            </button>
           </div>
         </header>
 
         <div class="toolbar" aria-label="서식 도구">
           <div class="toolbar-row primary">
-            <select id="fontFamilyToolbarSelect" class="toolbar-select" title="글씨체 변경" aria-label="글씨체 변경"></select>
-            <label class="toolbar-number-field size-field" title="글씨 크기">
+            <select id="fontFamilyToolbarSelect" class="toolbar-select" data-toolbar-key="fontFamily" title="글씨체 변경" aria-label="글씨체 변경"></select>
+            <label class="toolbar-number-field size-field" data-toolbar-key="fontSize" title="글씨 크기">
               <span>크기</span>
               <input id="fontSizeToolbarSelect" class="toolbar-size-select" type="number" min="8" max="96" step="1" aria-label="글씨 크기" />
             </label>
-            <label class="toolbar-number-field line-field" title="줄간격">
+            <label class="toolbar-number-field line-field" data-toolbar-key="lineSpacing" title="줄간격">
               <span>줄</span>
               <input id="lineSpacingToolbarSelect" class="toolbar-line-select" type="number" min="0.8" max="4" step="0.05" aria-label="줄간격" />
             </label>
           </div>
           <div class="toolbar-row secondary">
-            <button id="undoButton" class="tool-button" type="button" title="되돌리기">↶</button>
-            <button id="redoButton" class="tool-button" type="button" title="다시하기">↷</button>
-            <button class="tool-button" type="button" data-command="bold" title="굵게"><b>B</b></button>
-            <button class="tool-button" type="button" data-command="italic" title="기울임"><i>I</i></button>
-            <button class="tool-button" type="button" data-command="underline" title="밑줄"><u>U</u></button>
-            <button class="tool-button" type="button" data-command="strikeThrough" title="취소선"><s>S</s></button>
-            <button id="bulletButton" class="tool-button" type="button" title="목록">•</button>
-            <button id="orderedListButton" class="tool-button" type="button" title="번호 목록">1.</button>
-            <button id="checkButton" class="tool-button" type="button" title="체크">☐</button>
-            <button id="tableButton" class="tool-button" type="button" title="표 삽입" aria-label="표 삽입">
+            <button id="undoButton" class="tool-button" data-toolbar-key="undo" type="button" title="되돌리기">↶</button>
+            <button id="redoButton" class="tool-button" data-toolbar-key="redo" type="button" title="다시하기">↷</button>
+            <button class="tool-button" type="button" data-command="bold" data-toolbar-key="bold" title="굵게"><b>B</b></button>
+            <button class="tool-button" type="button" data-command="italic" data-toolbar-key="italic" title="기울임"><i>I</i></button>
+            <button class="tool-button" type="button" data-command="underline" data-toolbar-key="underline" title="밑줄"><u>U</u></button>
+            <button class="tool-button" type="button" data-command="strikeThrough" data-toolbar-key="strike" title="취소선"><s>S</s></button>
+            <button id="bulletButton" class="tool-button" data-toolbar-key="bullet" type="button" title="목록">•</button>
+            <button id="orderedListButton" class="tool-button" data-toolbar-key="orderedList" type="button" title="번호목록">1.</button>
+            <button id="checkButton" class="tool-button" data-toolbar-key="checklist" type="button" title="체크">☐</button>
+            <button id="tableButton" class="tool-button" data-toolbar-key="table" type="button" title="표 삽입" aria-label="표 삽입">
               <svg class="toolbar-svg table-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <rect x="4" y="5" width="16" height="14" rx="3"></rect>
                 <path d="M4 10h16M9 5v14M15 5v14M4 15h16"></path>
               </svg>
             </button>
-            <label class="toolbar-color-field" title="글씨 색">
+            <label class="toolbar-color-field" data-toolbar-key="textColor" title="글씨 색">
               <span>A</span>
               <input id="textColorInput" type="color" value="#283044" aria-label="글씨 색" />
             </label>
-            <button id="backgroundButton" class="tool-button" type="button" title="배경 변경" aria-label="배경 변경">
+            <button id="backgroundButton" class="tool-button" data-toolbar-key="background" type="button" title="배경 변경" aria-label="배경 변경">
               <svg class="toolbar-svg background-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <rect x="4" y="5" width="16" height="14" rx="3"></rect>
                 <circle cx="15.5" cy="9.5" r="1.7"></circle>
                 <path d="M6.5 17l4.2-4.4 3.2 3.1 2.1-2.3 1.5 3.6"></path>
               </svg>
             </button>
-            <button id="emojiButton" class="tool-button" type="button" title="이모티콘 (Ctrl+Shift+E)" aria-label="이모티콘">
+            <button id="emojiButton" class="tool-button" data-toolbar-key="emoji" type="button" title="이모티콘 (Ctrl+Shift+E)" aria-label="이모티콘">
               <span class="emoji-tool-icon" aria-hidden="true">☺</span>
             </button>
           </div>
@@ -81,6 +89,33 @@
         <div id="memoColorPalette" class="memo-color-palette hidden" aria-label="배경색 선택"></div>
         <div id="textColorPalette" class="text-color-palette hidden" aria-label="Text color palette"></div>
         <div id="emojiPalette" class="emoji-palette hidden" aria-label="이모티콘 선택"></div>
+        <div id="attachmentPanel" class="memo-side-panel hidden" aria-label="첨부파일">
+          <div class="memo-side-panel-header">
+            <strong>첨부파일</strong>
+            <button id="addAttachmentButton" class="small-button" type="button">추가</button>
+          </div>
+          <div id="attachmentList" class="attachment-list"></div>
+          <p id="attachmentStatus" class="hint-text"></p>
+        </div>
+        <div id="reminderPanel" class="memo-side-panel hidden" aria-label="알림">
+          <div class="memo-side-panel-header">
+            <strong>알림</strong>
+          </div>
+          <div class="reminder-form">
+            <input id="reminderTitleInput" type="text" maxlength="80" placeholder="알림 제목" />
+            <input id="reminderBodyInput" type="text" maxlength="240" placeholder="간단한 내용" />
+            <input id="reminderDateTimeInput" type="datetime-local" />
+            <select id="reminderRepeatSelect">
+              <option value="none">반복 없음</option>
+              <option value="daily">매일</option>
+              <option value="weekly">매주</option>
+              <option value="monthly">매월</option>
+            </select>
+            <button id="addReminderButton" class="small-button" type="button">등록</button>
+          </div>
+          <div id="reminderList" class="reminder-list"></div>
+          <p id="reminderStatus" class="hint-text"></p>
+        </div>
 
         <div id="memoListPanel" class="memo-list-panel hidden" aria-label="전체 메모 목록">
           <div class="memo-list-panel-header">
@@ -210,6 +245,10 @@
             <span>전체 글씨체 크기</span>
             <input id="commonFontSizeSelect" type="number" min="9" max="24" step="1" />
           </label>
+          <label class="check-field">
+            <input id="opacityControlsEnabledInput" type="checkbox" checked />
+            <span>투명도 사용</span>
+          </label>
           <p class="hint-text">설정, 버튼, 목록처럼 메모 내용 밖에 보이는 글씨체입니다.</p>
         </section>
 
@@ -288,7 +327,7 @@
           <div class="panel-size-fields">
             <label class="field">
               <span>패널 너비</span>
-              <input id="panelWidthInput" type="number" min="280" max="1200" step="10" />
+              <input id="panelWidthInput" type="number" min="340" max="1200" step="10" />
             </label>
             <label class="field">
               <span>자유 지정 높이</span>
@@ -333,6 +372,12 @@
             <input id="startupGuideInput" type="checkbox" />
             <span>앱이 켜질 때 안내 표시</span>
           </label>
+        </section>
+
+        <section class="settings-section">
+          <h3>버튼 표시</h3>
+          <div id="toolbarButtonSettingsList" class="toolbar-button-settings-list"></div>
+          <p class="hint-text">메인 메모와 팝업 메모의 서식 도구 버튼에 공통 적용됩니다.</p>
         </section>
 
         <section class="settings-section">

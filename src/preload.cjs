@@ -17,8 +17,16 @@ contextBridge.exposeInMainWorld("memoEdge", {
   importBackgroundImage: () => ipcRenderer.invoke("background:import"),
   importEmojiImage: () => ipcRenderer.invoke("emoji:import-image"),
   saveBackgroundImage: (dataUrl) => ipcRenderer.invoke("background:save-cropped", dataUrl),
+  importAttachment: (memoId) => ipcRenderer.invoke("attachment:import", memoId),
+  openAttachment: (filePath) => ipcRenderer.invoke("attachment:open", filePath),
+  revealAttachment: (filePath) => ipcRenderer.invoke("attachment:reveal", filePath),
+  removeAttachment: (filePath) => ipcRenderer.invoke("attachment:remove", filePath),
+  removeMemoAttachmentFolder: (memoId) => ipcRenderer.invoke("attachment:remove-memo-folder", memoId),
+  syncReminders: (reminders) => ipcRenderer.invoke("reminder:sync", reminders),
   getUserName: () => ipcRenderer.invoke("user:get-name"),
   detachMemo: (memo) => ipcRenderer.invoke("memo:detach", memo),
+  refreshDetachedMemo: (memo) => ipcRenderer.invoke("memo:detached-refresh-state", memo),
+  refreshDetachedToolbar: (payload) => ipcRenderer.invoke("memo:detached-toolbar-state", payload),
   getDetachedMemo: () => ipcRenderer.invoke("memo:detached-get"),
   updateDetachedMemo: (memo) => ipcRenderer.invoke("memo:detached-update", memo),
   attachDetachedMemo: (id) => ipcRenderer.invoke("memo:attach", id),
@@ -39,6 +47,12 @@ contextBridge.exposeInMainWorld("memoEdge", {
   onOpenEmoji: (callback) => {
     ipcRenderer.on("shortcut:open-emoji", () => callback());
   },
+  onReminderOpenMemo: (callback) => {
+    ipcRenderer.on("reminder:open-memo", (_, payload) => callback(payload));
+  },
+  onReminderFired: (callback) => {
+    ipcRenderer.on("reminder:fired", (_, payload) => callback(payload));
+  },
   onDetachedMemoUpdated: (callback) => {
     ipcRenderer.on("memo:detached-updated", (_, memo) => callback(memo));
   },
@@ -47,5 +61,8 @@ contextBridge.exposeInMainWorld("memoEdge", {
   },
   onDetachedMemoRefresh: (callback) => {
     ipcRenderer.on("memo:detached-refresh", (_, memo) => callback(memo));
+  },
+  onDetachedToolbarState: (callback) => {
+    ipcRenderer.on("memo:detached-toolbar-state", (_, payload) => callback(payload));
   }
 });

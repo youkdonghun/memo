@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } = require("electron");
+const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } = require("electron");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -13,8 +13,10 @@ const BASE_HEIGHT = 520;
 const SETTINGS_HEIGHT = 720;
 const MIN_HEIGHT = 180;
 const MAX_CUSTOM_HEIGHT = 1400;
-const MIN_PANEL_WIDTH = 280;
+const MIN_PANEL_WIDTH = 340;
 const MAX_CUSTOM_WIDTH = 1200;
+const APP_NAME = "MEMO BOM";
+const APP_USER_MODEL_ID = "com.youk.memobom";
 
 const DEFAULT_SETTINGS = {
   dockEdge: "right",
@@ -70,8 +72,19 @@ let sideTitleEditOpen = false;
 let settingsSaveTimer = null;
 let startupNotificationShown = false;
 let shortcutTopmostActive = false;
+let reminderTimers = new Map();
+let firedReminderInstances = new Map();
+const appNotificationWindows = new Map();
+const appNotificationCallbacks = new Map();
 const detachedWindows = new Map();
 const detachedMemos = new Map();
+
+function configureAppIdentity() {
+  app.setName(APP_NAME);
+  if (process.platform === "win32") app.setAppUserModelId(APP_USER_MODEL_ID);
+}
+
+configureAppIdentity();
 
 function settingsPath() {
   return path.join(app.getPath("userData"), "settings.json");
@@ -183,17 +196,52 @@ function ensureDefaultDisplayTarget() {
   saveSettings();
 }
 
-function resolveIconPath() {
-  const iconNames =
-    process.platform === "darwin" ? ["icon.png", "icon.icns", "icon.ico"] : ["icon.ico", "icon.png"];
-  const roots = [
+function iconSearchRoots() {
+  return [
     path.join(process.resourcesPath || "", "build"),
     path.join(__dirname, "..", "build"),
     path.join(__dirname, "..", "..", "build")
   ];
+}
+
+function resolveIconPath(preferredIconNames = null) {
+  const iconNames =
+    preferredIconNames ||
+    (process.platform === "darwin" ? ["icon.png", "icon.icns", "icon.ico"] : ["icon.ico", "icon.png"]);
+  const roots = iconSearchRoots();
   const candidates = roots.flatMap((root) => iconNames.map((iconName) => path.join(root, iconName)));
 
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
+}
+
+function resolveIconPathByNamePriority(iconNames) {
+  const roots = iconSearchRoots();
+  const candidates = iconNames.flatMap((iconName) => roots.map((root) => path.join(root, iconName)));
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
+}
+
+function resolveNotificationIconDataUrl() {
+  const iconPath = resolveIconPathByNamePriority(["icon.png", "icon.ico", "icon.icns"]);
+  if (!iconPath) return "";
+  try {
+    const image = nativeImage.createFromPath(iconPath);
+    if (!image.isEmpty()) {
+      const resized = image.resize({ width: 64, height: 64, quality: "best" });
+      const buffer = resized.isEmpty() ? image.toPNG() : resized.toPNG();
+      if (buffer?.length) return `data:image/png;base64,${buffer.toString("base64")}`;
+    }
+  } catch (error) {
+    console.warn("Failed to convert notification icon", error);
+  }
+  try {
+    const ext = path.extname(iconPath).toLowerCase();
+    const mimeType = ext === ".ico" ? "image/x-icon" : ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
+    const buffer = fs.readFileSync(iconPath);
+    if (buffer.length) return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  } catch (error) {
+    console.warn("Failed to read notification icon", error);
+  }
+  return "";
 }
 
 function createIconImage() {
@@ -207,6 +255,30 @@ function createIconImage() {
     return trayImage;
   }
   return image;
+}
+
+function configureWindowIdentity(window, displayName = APP_NAME) {
+  if (!window || window.isDestroyed()) return;
+  const iconPath = resolveIconPath(["icon.ico", "icon.png"]);
+  if (iconPath) {
+    try {
+      window.setIcon(iconPath);
+    } catch (error) {
+      console.warn("Failed to set window icon", error);
+    }
+  }
+  if (process.platform !== "win32") return;
+  try {
+    window.setAppDetails({
+      appId: APP_USER_MODEL_ID,
+      appIconPath: iconPath || process.execPath,
+      appIconIndex: 0,
+      relaunchCommand: process.execPath,
+      relaunchDisplayName: displayName || APP_NAME
+    });
+  } catch (error) {
+    console.warn("Failed to set window app details", error);
+  }
 }
 
 function sanitizeFontName(name) {
@@ -243,6 +315,100 @@ function safeFileName(value, fallback) {
     .replace(/\s+/g, " ")
     .trim();
   return clean || fallback || "asset";
+}
+
+function memoAttachmentDir(memoId) {
+  const safeMemoId = safeFileName(memoId, "memo");
+  const dir = path.join(userDataAssetDir("attachments"), safeMemoId);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function isPathInside(parentDir, candidatePath) {
+  const parent = path.resolve(parentDir);
+  const candidate = path.resolve(candidatePath);
+  return candidate === parent || candidate.startsWith(`${parent}${path.sep}`);
+}
+
+function safeAttachmentPath(filePath) {
+  if (typeof filePath !== "string" || !filePath.trim()) return "";
+  const attachmentsRoot = userDataAssetDir("attachments");
+  return isPathInside(attachmentsRoot, filePath) ? filePath : "";
+}
+
+function normalizeAttachmentPayload(attachment = {}) {
+  const storedPath = safeAttachmentPath(attachment.storedPath || attachment.path);
+  if (!storedPath) return null;
+  const name = safeFileName(attachment.name || path.basename(storedPath), "attachment");
+  const ext = path.extname(name).replace(/^\./, "").toLowerCase();
+  let size = Number(attachment.size);
+  if (!Number.isFinite(size)) {
+    try {
+      size = fs.statSync(storedPath).size;
+    } catch {
+      size = 0;
+    }
+  }
+  return {
+    id: typeof attachment.id === "string" && attachment.id ? attachment.id : `attachment-${Date.now()}`,
+    name,
+    ext,
+    size,
+    storedPath,
+    url: pathToFileURL(storedPath).href,
+    createdAt: Number.isFinite(Number(attachment.createdAt)) ? Number(attachment.createdAt) : Date.now()
+  };
+}
+
+async function importAttachmentFile(memoId) {
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: "첨부파일 추가",
+    properties: ["openFile"]
+  });
+
+  if (result.canceled || !result.filePaths?.[0]) return { ok: false, canceled: true };
+
+  const source = result.filePaths[0];
+  const originalName = path.basename(source);
+  const fileName = `${Date.now()}-${safeFileName(originalName, "attachment")}`;
+  const target = path.join(memoAttachmentDir(memoId), fileName);
+  fs.copyFileSync(source, target);
+  return {
+    ok: true,
+    attachment: normalizeAttachmentPayload({
+      id: `attachment-${Date.now()}`,
+      name: originalName,
+      storedPath: target,
+      createdAt: Date.now()
+    })
+  };
+}
+
+async function openAttachmentFile(filePath) {
+  const safePath = safeAttachmentPath(filePath);
+  if (!safePath || !fs.existsSync(safePath)) return { ok: false, message: "ATTACHMENT_NOT_FOUND" };
+  const message = await shell.openPath(safePath);
+  return message ? { ok: false, message } : { ok: true };
+}
+
+function revealAttachmentFile(filePath) {
+  const safePath = safeAttachmentPath(filePath);
+  if (!safePath || !fs.existsSync(safePath)) return { ok: false, message: "ATTACHMENT_NOT_FOUND" };
+  shell.showItemInFolder(safePath);
+  return { ok: true };
+}
+
+function removeAttachmentFile(filePath) {
+  const safePath = safeAttachmentPath(filePath);
+  if (!safePath) return { ok: false, message: "INVALID_ATTACHMENT_PATH" };
+  if (fs.existsSync(safePath)) fs.rmSync(safePath, { force: true });
+  return { ok: true };
+}
+
+function removeMemoAttachmentFolder(memoId) {
+  const dir = memoAttachmentDir(memoId);
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  return { ok: true };
 }
 
 function loadCustomFonts() {
@@ -683,6 +849,10 @@ function normalizeDetachedMemo(memo = {}) {
     backgroundCoverage: normalizeBackgroundCoverage(memo.backgroundCoverage),
     backgroundPositionX: normalizeBackgroundPosition(memo.backgroundPositionX),
     backgroundPositionY: normalizeBackgroundPosition(memo.backgroundPositionY),
+    attachments: Array.isArray(memo.attachments) ? memo.attachments.map(normalizeAttachmentPayload).filter(Boolean) : [],
+    reminders: Array.isArray(memo.reminders) ? memo.reminders : [],
+    opacityControlsEnabled: memo.opacityControlsEnabled !== false,
+    toolbarButtons: memo.toolbarButtons && typeof memo.toolbarButtons === "object" ? { ...memo.toolbarButtons } : null,
     html: typeof memo.html === "string" ? memo.html : ""
   };
 }
@@ -746,6 +916,7 @@ function createDetachedMemoWindow(memoPayload) {
   });
 
   detachedWindow.__memoId = memo.id;
+  configureWindowIdentity(detachedWindow, "MEMO BOM 팝업");
   detachedWindow.setMenu(buildDetachedWindowMenu());
   detachedWindows.set(memo.id, detachedWindow);
   detachedWindow.loadFile(path.join(__dirname, "renderer", "detached.html"));
@@ -851,42 +1022,322 @@ function createTray() {
   refreshTrayMenu();
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function closeAppNotification(id) {
+  const notificationWindow = appNotificationWindows.get(id);
+  appNotificationCallbacks.delete(id);
+  appNotificationWindows.delete(id);
+  if (notificationWindow && !notificationWindow.isDestroyed()) notificationWindow.close();
+}
+
+function appNotificationHtml({ id, title, body, iconUrl }) {
+  const iconMarkup = iconUrl
+    ? `<img class="icon" src="${escapeHtml(iconUrl)}" alt="" />`
+    : `<div class="icon icon-fallback" aria-hidden="true">MB</div>`;
+  return `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: "Malgun Gothic", "Segoe UI", sans-serif;
+      color: #283044;
+      background: transparent;
+    }
+    .toast {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) 28px;
+      grid-template-rows: auto 1fr;
+      gap: 8px 12px;
+      padding: 13px 14px;
+      border: 1px solid rgba(34, 42, 64, 0.12);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 14px 38px rgba(15, 23, 42, 0.22);
+      cursor: pointer;
+      user-select: none;
+    }
+    .app-name {
+      grid-column: 1 / 3;
+      font-size: 12px;
+      font-weight: 800;
+      color: #596273;
+    }
+    .close {
+      grid-column: 3;
+      grid-row: 1;
+      width: 24px;
+      height: 24px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: #667085;
+      font-size: 0;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .close::before {
+      content: "\\00d7";
+      font-size: 18px;
+      color: #667085;
+    }
+    .close:hover { background: rgba(31, 41, 55, 0.08); }
+    .icon {
+      grid-column: 1;
+      grid-row: 2;
+      width: 50px;
+      height: 50px;
+      border-radius: 10px;
+      object-fit: contain;
+      background: #fff8db;
+      border: 1px solid rgba(34, 42, 64, 0.08);
+    }
+    .icon-fallback {
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 900;
+      color: #7c4d18;
+    }
+    .content {
+      grid-column: 2 / 4;
+      grid-row: 2;
+      align-self: center;
+      min-width: 0;
+    }
+    .title {
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 900;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .body {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+      white-space: pre-line;
+      color: #344054;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <section class="toast" id="toast">
+    <div class="app-name">MEMO BOM</div>
+    <button class="close" id="closeButton" type="button" aria-label="닫기">×</button>
+    ${iconMarkup}
+    <div class="content">
+      <p class="title">${escapeHtml(title)}</p>
+      <p class="body">${escapeHtml(body)}</p>
+    </div>
+  </section>
+  <script>
+    const { ipcRenderer } = require("electron");
+    const id = ${JSON.stringify(id)};
+    document.getElementById("toast").addEventListener("click", () => ipcRenderer.send("app-notification:click", id));
+    document.getElementById("closeButton").addEventListener("click", (event) => {
+      event.stopPropagation();
+      ipcRenderer.send("app-notification:close", id);
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function showAppNotification({ title, body, onClick = null, durationMs = 12000 }) {
+  const id = `notification-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const width = 370;
+  const height = 118;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const { workArea } = display;
+  const stackIndex = appNotificationWindows.size;
+  const x = Math.round(workArea.x + workArea.width - width - 18);
+  const y = Math.round(workArea.y + workArea.height - height - 18 - stackIndex * (height + 10));
+  const iconPath = resolveIconPath();
+  const iconUrl = resolveNotificationIconDataUrl();
+
+  const notificationWindow = new BrowserWindow({
+    width,
+    height,
+    x,
+    y,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    title: "MEMO BOM",
+    icon: iconPath || undefined,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  configureWindowIdentity(notificationWindow, APP_NAME);
+  appNotificationWindows.set(id, notificationWindow);
+  appNotificationCallbacks.set(id, typeof onClick === "function" ? onClick : null);
+  notificationWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  notificationWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(appNotificationHtml({ id, title, body, iconUrl }))}`);
+  notificationWindow.webContents.once("did-finish-load", () => notificationWindow.showInactive());
+  notificationWindow.on("closed", () => {
+    appNotificationWindows.delete(id);
+    appNotificationCallbacks.delete(id);
+  });
+  setTimeout(() => closeAppNotification(id), durationMs).unref?.();
+  return { ok: true, id };
+}
+
 function showBackgroundStartupNotification() {
   if (startupNotificationShown) return;
   startupNotificationShown = true;
 
-  const title = "MEMO BOM";
-  const body = "백그라운드에서 실행 중입니다.\n트레이의 아이콘으로 메모를 사용하세요.";
-  const iconPath = resolveIconPath();
+  showAppNotification({
+    title: "MEMO BOM",
+    body: "백그라운드에서 실행 중입니다.\n트레이의 아이콘으로 메모를 사용하세요.",
+    onClick: () => sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true }),
+    durationMs: 9000
+  });
+}
 
-  try {
-    if (Notification.isSupported()) {
-      const notification = new Notification({
-        title,
-        body,
-        icon: iconPath || undefined,
-        silent: true
-      });
-      notification.on("click", () => sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true }));
-      notification.show();
+function clearReminderTimers() {
+  reminderTimers.forEach((timer) => clearTimeout(timer));
+  reminderTimers = new Map();
+}
+
+function reminderKey(reminder) {
+  return `${reminder.memoId}:${reminder.id}`;
+}
+
+function reminderSlotKey(reminder) {
+  return `${reminder.memoId}:${Number(reminder.nextFireAt) || 0}`;
+}
+
+function reminderInstanceKey(reminder) {
+  return reminderSlotKey(reminder);
+}
+
+function normalizeReminderFireTime(value) {
+  const date = new Date(Number(value));
+  if (!Number.isFinite(date.getTime())) return NaN;
+  date.setSeconds(0, 0);
+  return date.getTime();
+}
+
+function normalizeReminderPayload(reminder = {}) {
+  const memoId = typeof reminder.memoId === "string" ? reminder.memoId : "";
+  const id = typeof reminder.id === "string" ? reminder.id : "";
+  const nextFireAt = normalizeReminderFireTime(reminder.nextFireAt);
+  if (!memoId || !id || !Number.isFinite(nextFireAt)) return null;
+  return {
+    memoId,
+    id,
+    memoTitle: typeof reminder.memoTitle === "string" && reminder.memoTitle.trim() ? reminder.memoTitle.trim() : "MEMO BOM",
+    title: typeof reminder.title === "string" && reminder.title.trim() ? reminder.title.trim() : "메모 알림",
+    body: typeof reminder.body === "string" ? reminder.body.trim() : "",
+    repeat: ["none", "daily", "weekly", "monthly"].includes(reminder.repeat) ? reminder.repeat : "none",
+    nextFireAt,
+    enabled: reminder.enabled !== false
+  };
+}
+
+function openMemoFromReminder(memoId) {
+  showWindow({ forceTopmost: true });
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const send = () => mainWindow.webContents.send("reminder:open-memo", { memoId });
+  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once("did-finish-load", send);
+  else send();
+}
+
+function fireReminder(reminder) {
+  const key = reminderSlotKey(reminder);
+  const instanceKey = reminderInstanceKey(reminder);
+  if (firedReminderInstances.has(instanceKey)) return;
+  firedReminderInstances.set(instanceKey, Date.now());
+  if (firedReminderInstances.size > 500) {
+    firedReminderInstances = new Map(Array.from(firedReminderInstances.entries()).slice(-250));
+  }
+  reminderTimers.delete(key);
+  const body = reminder.body || reminder.memoTitle || "";
+  const openReminderMemo = () => openMemoFromReminder(reminder.memoId);
+
+  showAppNotification({
+    title: reminder.title,
+    body,
+    onClick: openReminderMemo
+  });
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("reminder:fired", {
+      memoId: reminder.memoId,
+      reminderId: reminder.id,
+      slotFireAt: reminder.nextFireAt,
+      firedAt: Date.now(),
+      repeat: reminder.repeat
+    });
+  }
+}
+
+function scheduleReminder(reminder) {
+  if (!reminder.enabled) return;
+  const key = reminderSlotKey(reminder);
+  const instanceKey = reminderInstanceKey(reminder);
+  if (firedReminderInstances.has(instanceKey)) return;
+  const delay = reminder.nextFireAt - Date.now();
+  const maxDelay = 2147483647;
+  const timer = setTimeout(() => {
+    if (delay > maxDelay) {
+      reminderTimers.delete(key);
+      scheduleReminder({ ...reminder, nextFireAt: reminder.nextFireAt });
       return;
     }
-  } catch {
-    // Fall back to the tray balloon below when native notifications are unavailable.
-  }
+    fireReminder(reminder);
+  }, Math.max(0, Math.min(delay, maxDelay)));
+  reminderTimers.set(key, timer);
+}
 
-  if (process.platform === "win32" && tray?.displayBalloon) {
-    try {
-      tray.displayBalloon({
-        title,
-        content: body,
-        icon: iconPath ? nativeImage.createFromPath(iconPath) : createIconImage(),
-        noSound: true
-      });
-    } catch {
-      // Notification support depends on the Windows notification settings.
-    }
-  }
+function syncReminders(reminders = []) {
+  clearReminderTimers();
+  if (!Array.isArray(reminders)) return { ok: false, message: "INVALID_REMINDERS" };
+  const seenSlots = new Set();
+  reminders
+    .map(normalizeReminderPayload)
+    .filter(Boolean)
+    .filter((reminder) => {
+      const slot = reminderSlotKey(reminder);
+      if (seenSlots.has(slot)) return false;
+      seenSlots.add(slot);
+      return true;
+    })
+    .forEach(scheduleReminder);
+  return { ok: true, count: reminderTimers.size };
 }
 
 function createMainWindow() {
@@ -913,6 +1364,7 @@ function createMainWindow() {
     }
   });
 
+  configureWindowIdentity(mainWindow, APP_NAME);
   mainWindow.setSkipTaskbar(true);
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   applyWindowZOrder();
@@ -950,7 +1402,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
-    if (process.platform === "win32") app.setAppUserModelId("com.youk.memobom");
+    configureAppIdentity();
 
     loadSettings();
     ensureDefaultDisplayTarget();
@@ -968,6 +1420,16 @@ if (!gotSingleInstanceLock) {
     });
   });
 }
+
+ipcMain.on("app-notification:click", (_, id) => {
+  const callback = appNotificationCallbacks.get(id);
+  closeAppNotification(id);
+  if (typeof callback === "function") callback();
+});
+
+ipcMain.on("app-notification:close", (_, id) => {
+  closeAppNotification(id);
+});
 
 ipcMain.handle("shell:get-state", () => ({
   settings,
@@ -1053,6 +1515,30 @@ ipcMain.handle("shell:nudge-y", (_, deltaY) => {
 
 ipcMain.handle("memo:detach", (_, memo) => createDetachedMemoWindow(memo));
 
+ipcMain.handle("memo:detached-refresh-state", (_, memoPayload = {}) => {
+  const memo = normalizeDetachedMemo(memoPayload);
+  detachedMemos.set(memo.id, memo);
+  const target = detachedWindows.get(memo.id);
+  if (target && !target.isDestroyed()) {
+    target.webContents.send("memo:detached-refresh", memo);
+    return { ok: true, id: memo.id };
+  }
+  return { ok: false, message: "DETACHED_WINDOW_NOT_FOUND" };
+});
+
+ipcMain.handle("memo:detached-toolbar-state", (_, payload = {}) => {
+  const id = typeof payload.id === "string" ? payload.id : "";
+  const target = detachedWindows.get(id);
+  if (target && !target.isDestroyed()) {
+    target.webContents.send("memo:detached-toolbar-state", {
+      toolbarButtons: payload.toolbarButtons && typeof payload.toolbarButtons === "object" ? { ...payload.toolbarButtons } : null,
+      opacityControlsEnabled: payload.opacityControlsEnabled !== false
+    });
+    return { ok: true, id };
+  }
+  return { ok: false, message: "DETACHED_WINDOW_NOT_FOUND" };
+});
+
 ipcMain.handle("memo:detached-get", (event) => ({
   ok: true,
   memo: detachedMemoForSender(event.sender)
@@ -1120,6 +1606,48 @@ ipcMain.handle("background:save-cropped", (_, dataUrl) => {
     return { ok: false, message: String(error?.message || error) };
   }
 });
+
+ipcMain.handle("attachment:import", async (_, memoId) => {
+  try {
+    return await importAttachmentFile(memoId);
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("attachment:open", async (_, filePath) => {
+  try {
+    return await openAttachmentFile(filePath);
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("attachment:reveal", (_, filePath) => {
+  try {
+    return revealAttachmentFile(filePath);
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("attachment:remove", (_, filePath) => {
+  try {
+    return removeAttachmentFile(filePath);
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("attachment:remove-memo-folder", (_, memoId) => {
+  try {
+    return removeMemoAttachmentFolder(memoId);
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle("reminder:sync", (_, reminders) => syncReminders(reminders));
 
 ipcMain.handle("user:get-name", () => {
   const candidates = [
@@ -1204,6 +1732,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   saveSettings();
   isQuitting = true;
+  clearReminderTimers();
+  Array.from(appNotificationWindows.keys()).forEach(closeAppNotification);
 });
 
 app.on("will-quit", () => {

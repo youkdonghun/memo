@@ -21,6 +21,7 @@ const CARRIED_TYPING_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color"];
 const PERF_WARN_MS = 16;
 const PERF_SLOW_WARN_MS = 50;
 const SOFT_BACKGROUND_OPACITY = 0.62;
+const REMINDER_REPEAT_OPTIONS = ["none", "daily", "weekly", "monthly"];
 const TEXT_COLOR_PRESETS = [
   "#283044",
   "#111827",
@@ -114,6 +115,25 @@ const FONT_LABELS = {
   "Segoe UI": "Segoe UI"
 };
 
+const defaultToolbarButtons = {
+  fontFamily: true,
+  fontSize: true,
+  lineSpacing: true,
+  undo: true,
+  redo: true,
+  bold: true,
+  italic: true,
+  underline: true,
+  strike: true,
+  bullet: true,
+  orderedList: true,
+  checklist: true,
+  table: true,
+  textColor: true,
+  background: true,
+  emoji: true
+};
+
 function measureInteraction(label, fn, threshold = PERF_WARN_MS) {
   const start = performance.now();
   try {
@@ -148,6 +168,7 @@ let recentTextColors = loadRecentTextColors();
 let backgroundCropperState = null;
 let attachingDetachedMemo = false;
 let emojiShortcut = DEFAULT_EMOJI_SHORTCUT;
+let editingReminderId = null;
 
 const titleInput = document.getElementById("detachedTitleInput");
 const editor = document.getElementById("detachedEditor");
@@ -165,8 +186,25 @@ const tableButton = document.getElementById("tableButton");
 const clearButton = document.getElementById("clearButton");
 const textColorInput = document.getElementById("textColorInput");
 const textColorPalette = document.getElementById("textColorPalette");
+const linkButton = document.getElementById("detachedLinkButton");
 const emojiButton = document.getElementById("emojiButton");
 const emojiPalette = document.getElementById("emojiPalette");
+const attachmentButton = document.getElementById("detachedAttachmentButton");
+const attachmentCountBadge = document.getElementById("detachedAttachmentCount");
+const attachmentPanel = document.getElementById("detachedAttachmentPanel");
+const addAttachmentButton = document.getElementById("detachedAddAttachmentButton");
+const attachmentList = document.getElementById("detachedAttachmentList");
+const attachmentStatus = document.getElementById("detachedAttachmentStatus");
+const reminderButton = document.getElementById("detachedReminderButton");
+const reminderCountBadge = document.getElementById("detachedReminderCount");
+const reminderPanel = document.getElementById("detachedReminderPanel");
+const reminderTitleInput = document.getElementById("detachedReminderTitleInput");
+const reminderBodyInput = document.getElementById("detachedReminderBodyInput");
+const reminderDateTimeInput = document.getElementById("detachedReminderDateTimeInput");
+const reminderRepeatSelect = document.getElementById("detachedReminderRepeatSelect");
+const addReminderButton = document.getElementById("detachedAddReminderButton");
+const reminderList = document.getElementById("detachedReminderList");
+const reminderStatus = document.getElementById("detachedReminderStatus");
 const backgroundButton = document.getElementById("backgroundButton");
 const backgroundCropper = document.getElementById("backgroundCropper");
 const cropperTitle = document.getElementById("cropperTitle");
@@ -317,6 +355,112 @@ function normalizeBackgroundCrop(value) {
   };
 }
 
+function normalizeAttachment(value) {
+  if (!value || typeof value !== "object") return null;
+  const storedPath = typeof value.storedPath === "string" ? value.storedPath : "";
+  const id = typeof value.id === "string" && value.id ? value.id : storedPath;
+  const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "첨부파일";
+  if (!id || !storedPath) return null;
+  const size = Number(value.size);
+  const createdAt = Number(value.createdAt);
+  return {
+    id,
+    name,
+    ext: typeof value.ext === "string" ? value.ext : "",
+    size: Number.isFinite(size) && size > 0 ? size : 0,
+    storedPath,
+    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now()
+  };
+}
+
+function normalizeAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeAttachment).filter(Boolean);
+}
+
+function normalizeReminderRepeat(value) {
+  return REMINDER_REPEAT_OPTIONS.includes(value) ? value : "none";
+}
+
+function normalizeReminderFireTimeValue(value) {
+  const date = new Date(Number(value));
+  if (!Number.isFinite(date.getTime())) return NaN;
+  date.setSeconds(0, 0);
+  return date.getTime();
+}
+
+function normalizeReminder(value) {
+  if (!value || typeof value !== "object") return null;
+  const id = typeof value.id === "string" && value.id ? value.id : `reminder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const title = typeof value.title === "string" && value.title.trim() ? value.title.trim().slice(0, 80) : "메모 알림";
+  const body = typeof value.body === "string" ? value.body.trim().slice(0, 240) : "";
+  const scheduledAt = normalizeReminderFireTimeValue(value.scheduledAt);
+  const nextFireAt = normalizeReminderFireTimeValue(value.nextFireAt);
+  const fallbackTime = Date.now() + 10 * 60 * 1000;
+  return {
+    id,
+    title,
+    body,
+    scheduledAt: Number.isFinite(scheduledAt) ? scheduledAt : fallbackTime,
+    repeat: normalizeReminderRepeat(value.repeat),
+    nextFireAt: Number.isFinite(nextFireAt) ? nextFireAt : Number.isFinite(scheduledAt) ? scheduledAt : fallbackTime,
+    lastFiredAt: Number.isFinite(Number(value.lastFiredAt)) ? Number(value.lastFiredAt) : null,
+    enabled: value.enabled !== false
+  };
+}
+
+function normalizeReminders(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const seenActiveSlots = new Set();
+  return value
+    .map(normalizeReminder)
+    .filter((reminder) => {
+      if (!reminder || seen.has(reminder.id)) return false;
+      seen.add(reminder.id);
+      if (reminder.enabled) {
+        const slotKey = String(reminder.nextFireAt);
+        if (seenActiveSlots.has(slotKey)) return false;
+        seenActiveSlots.add(slotKey);
+      }
+      return true;
+    });
+}
+
+function reminderGroupKey(reminder) {
+  if (reminder?.enabled) return "upcoming";
+  const repeat = normalizeReminderRepeat(reminder?.repeat);
+  const hasFired = Number.isFinite(Number(reminder?.lastFiredAt));
+  const fireTime = Number(reminder?.nextFireAt);
+  if (repeat === "none" && hasFired && Number.isFinite(fireTime) && fireTime <= Date.now()) return "expired";
+  return "disabled";
+}
+
+function groupedReminders(reminders = []) {
+  const groups = [
+    { key: "upcoming", title: "울릴 알림", items: [] },
+    { key: "expired", title: "만료된 알림", items: [] },
+    { key: "disabled", title: "꺼진 알림", items: [] }
+  ];
+  const groupMap = new Map(groups.map((group) => [group.key, group]));
+  reminders.forEach((reminder) => {
+    groupMap.get(reminderGroupKey(reminder))?.items.push(reminder);
+  });
+  groups.forEach((group) => {
+    group.items.sort((a, b) => {
+      const aTime = group.key === "expired" ? Number(a.lastFiredAt) || Number(a.nextFireAt) : Number(a.nextFireAt);
+      const bTime = group.key === "expired" ? Number(b.lastFiredAt) || Number(b.nextFireAt) : Number(b.nextFireAt);
+      return aTime - bTime;
+    });
+  });
+  return groups.filter((group) => group.items.length);
+}
+
+function normalizeToolbarButtons(value) {
+  const source = value && typeof value === "object" ? value : defaultToolbarButtons;
+  return Object.fromEntries(Object.keys(defaultToolbarButtons).map((key) => [key, source[key] !== false]));
+}
+
 function isBrokenFontName(value) {
   return typeof value !== "string" || !value.trim() || /[\uFFFD?]/.test(value);
 }
@@ -355,10 +499,14 @@ function rgbaString(hex, alpha = 1) {
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${clamp(alpha, 0, 1)})`;
 }
 
+function opacityControlsEnabled(nextMemo = memo) {
+  return nextMemo?.opacityControlsEnabled !== false;
+}
+
 function backgroundTransparencyState(nextMemo = memo) {
   const color = normalizeHexColor(nextMemo?.color, "#fff4b8");
   const backgroundImage = normalizeAssetUrl(nextMemo?.backgroundImage);
-  const transparency = normalizeOpacity(nextMemo?.backgroundOpacity);
+  const transparency = opacityControlsEnabled(nextMemo) ? normalizeOpacity(nextMemo?.backgroundOpacity) : 0;
   const coverage = backgroundImage ? normalizeBackgroundCoverage(nextMemo?.backgroundCoverage) : 1;
   return {
     color,
@@ -540,7 +688,17 @@ function syncToolbarTypography() {
   populateLineSpacingSelect(lineSpacingSelect, memo.lineSpacing);
 }
 
+function applyToolbarButtonVisibility(buttons = memo?.toolbarButtons) {
+  const visible = normalizeToolbarButtons(buttons);
+  document.querySelectorAll(".detached-toolbar [data-toolbar-key]").forEach((element) => {
+    const key = element.dataset.toolbarKey;
+    const hidden = key && visible[key] === false;
+    element.classList.toggle("toolbar-item-hidden", hidden);
+  });
+}
+
 function applyMemo(nextMemo) {
+  const previousMemo = memo || {};
   memo = {
     ...memo,
     ...nextMemo,
@@ -557,6 +715,13 @@ function applyMemo(nextMemo) {
     backgroundCoverage: normalizeBackgroundCoverage(nextMemo?.backgroundCoverage),
     backgroundPositionX: normalizeBackgroundPosition(nextMemo?.backgroundPositionX),
     backgroundPositionY: normalizeBackgroundPosition(nextMemo?.backgroundPositionY),
+    attachments: normalizeAttachments(Array.isArray(nextMemo?.attachments) ? nextMemo.attachments : previousMemo.attachments),
+    reminders: normalizeReminders(Array.isArray(nextMemo?.reminders) ? nextMemo.reminders : previousMemo.reminders),
+    opacityControlsEnabled:
+      nextMemo?.opacityControlsEnabled === undefined
+        ? previousMemo.opacityControlsEnabled !== false
+        : nextMemo.opacityControlsEnabled !== false,
+    toolbarButtons: normalizeToolbarButtons(nextMemo?.toolbarButtons || previousMemo.toolbarButtons),
     html: typeof nextMemo?.html === "string" ? nextMemo.html : ""
   };
   titleInput.value = memo.title;
@@ -567,6 +732,9 @@ function applyMemo(nextMemo) {
   applyMemoTheme();
   applyMemoTypography();
   syncToolbarTypography();
+  applyToolbarButtonVisibility(memo.toolbarButtons);
+  syncAttachmentControls();
+  syncReminderControls();
   prepareChecklistItems();
   resetEditorHistory();
   updateToolbarCommandState();
@@ -577,6 +745,7 @@ function serializedEditorHtml() {
     const clone = editor.cloneNode(true);
     stripTransientTableSelection(clone);
     prepareChecklistItems(clone);
+    sanitizeLinks(clone);
     clone.querySelectorAll(".check-text").forEach((text) => {
       text.textContent = text.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "");
     });
@@ -604,7 +773,9 @@ function detachedMemoPatch(includeHtml = memoHtmlDirty) {
     backgroundTop: memo.backgroundTop,
     backgroundCoverage: memo.backgroundCoverage,
     backgroundPositionX: memo.backgroundPositionX,
-    backgroundPositionY: memo.backgroundPositionY
+    backgroundPositionY: memo.backgroundPositionY,
+    attachments: normalizeAttachments(memo.attachments),
+    reminders: normalizeReminders(memo.reminders)
   };
   if (includeHtml) {
     patch.html = serializedEditorHtml();
@@ -1657,6 +1828,21 @@ async function handleEditorPaste(event) {
     return;
   }
 
+  const html = event.clipboardData?.getData("text/html") || "";
+  const plainText = event.clipboardData?.getData("text/plain") || "";
+  if (htmlContainsLink(html)) {
+    event.preventDefault();
+    restoreEditorSelection();
+    insertHtmlWithSafeLinks(html);
+    return;
+  }
+  if (textContainsAutoLink(plainText)) {
+    event.preventDefault();
+    restoreEditorSelection();
+    insertTextWithAutoLinks(plainText);
+    return;
+  }
+
   const file = imageFileFromPaste(event);
   if (!file) return;
   event.preventDefault();
@@ -1674,6 +1860,373 @@ function handleEditorCopy(event) {
   event.preventDefault();
   event.clipboardData.setData("text/html", payload.html);
   event.clipboardData.setData("text/plain", payload.text);
+}
+
+function setAttachmentStatus(message, timeout = 2500) {
+  if (!attachmentStatus) return;
+  attachmentStatus.textContent = message || "";
+  if (message && timeout) {
+    setTimeout(() => {
+      if (attachmentStatus.textContent === message) attachmentStatus.textContent = "";
+    }, timeout);
+  }
+}
+
+function setReminderStatus(message, timeout = 2500) {
+  if (!reminderStatus) return;
+  reminderStatus.textContent = message || "";
+  if (message && timeout) {
+    setTimeout(() => {
+      if (reminderStatus.textContent === message) reminderStatus.textContent = "";
+    }, timeout);
+  }
+}
+
+function formatAttachmentSize(size) {
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? Math.round(value) : Math.round(value * 10) / 10} ${units[unitIndex]}`;
+}
+
+function formatDateTime(value) {
+  const date = new Date(Number(value));
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleString("ko-KR", {
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function dateTimeInputValue(value) {
+  const date = new Date(Number(value));
+  if (!Number.isFinite(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function reminderFireTimeFromInput(value) {
+  const date = new Date(value || "");
+  if (!Number.isFinite(date.getTime())) return NaN;
+  date.setSeconds(0, 0);
+  return date.getTime();
+}
+
+function nextFutureReminderMinute(fromTime = Date.now()) {
+  const date = new Date(Number(fromTime));
+  if (!Number.isFinite(date.getTime())) return Date.now() + 60000;
+  date.setSeconds(0, 0);
+  date.setMinutes(date.getMinutes() + 1);
+  return date.getTime();
+}
+
+function repeatLabel(value) {
+  return {
+    none: "반복 없음",
+    daily: "매일",
+    weekly: "매주",
+    monthly: "매월"
+  }[normalizeReminderRepeat(value)];
+}
+
+function setAttachmentPanelOpen(open) {
+  if (!attachmentPanel || !attachmentButton) return;
+  attachmentPanel.classList.toggle("hidden", !open);
+  attachmentButton.classList.toggle("active", Boolean(open));
+  if (open) {
+    setReminderPanelOpen(false);
+    setTextColorPaletteOpen(false);
+    setEmojiPaletteOpen(false);
+    setTablePickerOpen(false);
+    setTableToolsOpen(false);
+    renderAttachmentPanel();
+  }
+}
+
+function setReminderPanelOpen(open) {
+  if (!reminderPanel || !reminderButton) return;
+  reminderPanel.classList.toggle("hidden", !open);
+  reminderButton.classList.toggle("active", Boolean(open));
+  if (open) {
+    setReminderStatus("");
+    setAttachmentPanelOpen(false);
+    setTextColorPaletteOpen(false);
+    setEmojiPaletteOpen(false);
+    setTablePickerOpen(false);
+    setTableToolsOpen(false);
+    if (reminderDateTimeInput && !reminderDateTimeInput.value) reminderDateTimeInput.value = dateTimeInputValue(Date.now() + 10 * 60 * 1000);
+    renderReminderPanel();
+  } else {
+    editingReminderId = null;
+    if (addReminderButton) addReminderButton.textContent = "등록";
+  }
+}
+
+function syncAttachmentControls() {
+  const count = normalizeAttachments(memo?.attachments).length;
+  if (attachmentCountBadge) {
+    attachmentCountBadge.textContent = String(count);
+    attachmentCountBadge.classList.toggle("hidden", count <= 0);
+  }
+  if (attachmentPanel && !attachmentPanel.classList.contains("hidden")) renderAttachmentPanel();
+}
+
+function syncReminderControls() {
+  const count = normalizeReminders(memo?.reminders).filter((item) => item.enabled).length;
+  if (reminderCountBadge) {
+    reminderCountBadge.textContent = String(count);
+    reminderCountBadge.classList.toggle("hidden", count <= 0);
+  }
+  if (reminderPanel && !reminderPanel.classList.contains("hidden")) renderReminderPanel();
+}
+
+function renderAttachmentPanel() {
+  if (!attachmentList || !memo) return;
+  memo.attachments = normalizeAttachments(memo.attachments);
+  attachmentList.innerHTML = "";
+  if (!memo.attachments.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint-text";
+    empty.append("첨부파일이 없습니다.", document.createElement("br"), "첨부파일 등록 시 별도파일로 생성되어 관리됩니다.");
+    attachmentList.appendChild(empty);
+    return;
+  }
+
+  memo.attachments.forEach((attachment) => {
+    const item = document.createElement("div");
+    item.className = "attachment-item";
+    const info = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "attachment-name";
+    name.textContent = attachment.name;
+    const meta = document.createElement("div");
+    meta.className = "attachment-meta";
+    meta.textContent = `${formatAttachmentSize(attachment.size)} · ${formatDateTime(attachment.createdAt)}`;
+    info.append(name, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "attachment-actions";
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "small-button";
+    openButton.textContent = "열기";
+    openButton.addEventListener("click", () => openAttachment(attachment));
+    const revealButton = document.createElement("button");
+    revealButton.type = "button";
+    revealButton.className = "small-button";
+    revealButton.textContent = "위치";
+    revealButton.addEventListener("click", () => revealAttachment(attachment));
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "small-button danger";
+    removeButton.textContent = "삭제";
+    removeButton.addEventListener("click", () => removeAttachment(attachment.id));
+    actions.append(openButton, revealButton, removeButton);
+    item.append(info, actions);
+    attachmentList.appendChild(item);
+  });
+}
+
+async function addAttachmentToDetachedMemo() {
+  if (!memo) return;
+  const result = await window.memoEdge.importAttachment?.(memo.id);
+  if (result?.canceled) return;
+  if (!result?.ok || !result.attachment) {
+    setAttachmentStatus(`첨부 추가 실패: ${result?.message || "알 수 없음"}`, 0);
+    return;
+  }
+  memo.attachments = normalizeAttachments([...(memo.attachments || []), result.attachment]);
+  syncAttachmentControls();
+  scheduleSave({ htmlDirty: false });
+}
+
+async function openAttachment(attachment) {
+  const result = await window.memoEdge.openAttachment?.(attachment.storedPath);
+  if (!result?.ok) setAttachmentStatus(`파일 열기 실패: ${result?.message || "알 수 없음"}`, 0);
+}
+
+async function revealAttachment(attachment) {
+  const result = await window.memoEdge.revealAttachment?.(attachment.storedPath);
+  if (!result?.ok) setAttachmentStatus(`위치 열기 실패: ${result?.message || "알 수 없음"}`, 0);
+}
+
+async function removeAttachment(attachmentId) {
+  if (!memo) return;
+  const attachment = normalizeAttachments(memo.attachments).find((item) => item.id === attachmentId);
+  if (!attachment) return;
+  const result = await window.memoEdge.removeAttachment?.(attachment.storedPath);
+  if (!result?.ok) {
+    setAttachmentStatus(`첨부 삭제 실패: ${result?.message || "알 수 없음"}`, 0);
+    return;
+  }
+  memo.attachments = normalizeAttachments(memo.attachments).filter((item) => item.id !== attachmentId);
+  syncAttachmentControls();
+  scheduleSave({ htmlDirty: false });
+}
+
+function renderReminderPanel() {
+  if (!reminderList || !memo) return;
+  memo.reminders = normalizeReminders(memo.reminders);
+  reminderList.innerHTML = "";
+  if (!memo.reminders.length) {
+    setReminderStatus("");
+    const empty = document.createElement("p");
+    empty.className = "hint-text";
+    empty.textContent = "등록된 알림이 없습니다.";
+    reminderList.appendChild(empty);
+    return;
+  }
+
+  groupedReminders(memo.reminders).forEach((group) => {
+    const section = document.createElement("section");
+    section.className = "reminder-section";
+    const heading = document.createElement("h4");
+    heading.className = "reminder-section-title";
+    heading.textContent = `${group.title} ${group.items.length}`;
+    section.appendChild(heading);
+
+    group.items.forEach((reminder) => {
+      const item = document.createElement("div");
+      item.className = "reminder-item";
+      item.dataset.reminderState = group.key;
+      if (!reminder.enabled) item.classList.add("disabled");
+      const info = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "reminder-title";
+      title.textContent = reminder.title;
+      const meta = document.createElement("div");
+      meta.className = "reminder-meta";
+      const stateText =
+        group.key === "expired"
+          ? `만료 · ${formatDateTime(reminder.lastFiredAt || reminder.nextFireAt)}`
+          : group.key === "disabled"
+            ? "꺼짐"
+            : "예정";
+      meta.textContent = `${formatDateTime(reminder.nextFireAt)} · ${repeatLabel(reminder.repeat)} · ${stateText}`;
+      info.append(title, meta);
+
+      const actions = document.createElement("div");
+      actions.className = "reminder-actions";
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "small-button";
+      editButton.textContent = "수정";
+      editButton.addEventListener("click", () => editReminder(reminder.id));
+      const toggleButton = document.createElement("button");
+      toggleButton.type = "button";
+      toggleButton.className = "small-button";
+      toggleButton.textContent = reminder.enabled ? "끄기" : "켜기";
+      toggleButton.addEventListener("click", () => toggleReminder(reminder.id));
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "small-button danger";
+      removeButton.textContent = "삭제";
+      removeButton.addEventListener("click", () => removeReminder(reminder.id));
+      actions.append(editButton, toggleButton, removeButton);
+      item.append(info, actions);
+      section.appendChild(item);
+    });
+
+    reminderList.appendChild(section);
+  });
+}
+
+function editReminder(reminderId) {
+  const reminder = normalizeReminders(memo?.reminders).find((item) => item.id === reminderId);
+  if (!reminder) return;
+  setReminderStatus("");
+  editingReminderId = reminder.id;
+  if (reminderTitleInput) reminderTitleInput.value = reminder.title;
+  if (reminderBodyInput) reminderBodyInput.value = reminder.body;
+  if (reminderDateTimeInput) reminderDateTimeInput.value = dateTimeInputValue(reminder.nextFireAt);
+  if (reminderRepeatSelect) reminderRepeatSelect.value = reminder.repeat;
+  if (addReminderButton) addReminderButton.textContent = "수정";
+}
+
+function reminderFromForm() {
+  const title = reminderTitleInput?.value.trim() || memo?.title || "메모 알림";
+  const body = reminderBodyInput?.value.trim() || "";
+  const scheduledAt = reminderFireTimeFromInput(reminderDateTimeInput?.value);
+  if (!Number.isFinite(scheduledAt)) return null;
+  return normalizeReminder({
+    id: editingReminderId || `reminder-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title,
+    body,
+    scheduledAt,
+    repeat: normalizeReminderRepeat(reminderRepeatSelect?.value),
+    nextFireAt: scheduledAt,
+    lastFiredAt: null,
+    enabled: true
+  });
+}
+
+function clearReminderForm() {
+  editingReminderId = null;
+  if (reminderTitleInput) reminderTitleInput.value = "";
+  if (reminderBodyInput) reminderBodyInput.value = "";
+  if (reminderDateTimeInput) reminderDateTimeInput.value = dateTimeInputValue(Date.now() + 10 * 60 * 1000);
+  if (reminderRepeatSelect) reminderRepeatSelect.value = "none";
+  if (addReminderButton) addReminderButton.textContent = "등록";
+  setReminderStatus("");
+}
+
+function addOrUpdateReminder() {
+  if (!memo) return;
+  const nextReminder = reminderFromForm();
+  if (!nextReminder) {
+    setReminderStatus("알림 시간을 입력해주세요.", 0);
+    return;
+  }
+  if (nextReminder.nextFireAt <= Date.now()) {
+    setReminderStatus("현재 이후의 시간을 입력해 주세요.", 0);
+    return;
+  }
+  const reminders = normalizeReminders(memo.reminders).filter((item) => item.id !== nextReminder.id);
+  if (!editingReminderId && reminders.some((item) => item.enabled && item.nextFireAt === nextReminder.nextFireAt)) {
+    setReminderStatus("같은 시간의 알림이 이미 있습니다.", 0);
+    return;
+  }
+  memo.reminders = [...reminders, nextReminder].sort((a, b) => a.nextFireAt - b.nextFireAt);
+  clearReminderForm();
+  syncReminderControls();
+  scheduleSave({ htmlDirty: false });
+}
+
+function toggleReminder(reminderId) {
+  if (!memo) return;
+  setReminderStatus("");
+  memo.reminders = normalizeReminders(memo.reminders).map((reminder) =>
+    reminder.id === reminderId
+      ? {
+          ...reminder,
+          enabled: !reminder.enabled,
+          nextFireAt: reminder.enabled
+            ? reminder.nextFireAt
+            : reminder.nextFireAt <= Date.now()
+              ? nextFutureReminderMinute()
+              : reminder.nextFireAt || reminder.scheduledAt
+        }
+      : reminder
+  );
+  syncReminderControls();
+  scheduleSave({ htmlDirty: false });
+}
+
+function removeReminder(reminderId) {
+  if (!memo) return;
+  setReminderStatus("");
+  memo.reminders = normalizeReminders(memo.reminders).filter((reminder) => reminder.id !== reminderId);
+  syncReminderControls();
+  scheduleSave({ htmlDirty: false });
 }
 
 async function importBackgroundForDetachedMemo() {
@@ -1991,6 +2544,134 @@ function insertNodeAtSelection(node) {
   }
   range.deleteContents();
   range.insertNode(node);
+}
+
+function normalizeLinkUrl(value) {
+  const raw = String(value || "")
+    .trim()
+    .replace(/^<+/, "")
+    .replace(/>+$/, "")
+    .replace(/[.,!?;:)\]\u3002\uff0c\uff01\uff1f\uff1b\uff1a]+$/u, "");
+  if (!raw) return "";
+  if (/^(https?:|mailto:)/i.test(raw)) return raw;
+  if (/^www\./i.test(raw)) return `https://${raw}`;
+  if (/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?$/i.test(raw)) {
+    return `https://${raw}`;
+  }
+  return "";
+}
+
+function textContainsAutoLink(value) {
+  return /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?)/i.test(String(value || ""));
+}
+
+function htmlContainsLink(value) {
+  return /<a\b[^>]*href\s*=/i.test(String(value || ""));
+}
+
+function sanitizeLinks(root = editor) {
+  root.querySelectorAll("a").forEach((link) => {
+    const href = normalizeLinkUrl(link.getAttribute("href") || link.textContent);
+    if (!href) {
+      link.replaceWith(...Array.from(link.childNodes));
+      return;
+    }
+    link.setAttribute("href", href);
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noreferrer");
+  });
+}
+
+function createLinkElement(text, href) {
+  const link = document.createElement("a");
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = text || href;
+  return link;
+}
+
+function editorRangeFromPoint(event) {
+  if (document.caretRangeFromPoint) return document.caretRangeFromPoint(event.clientX, event.clientY);
+  const position = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+  if (!position) return null;
+  const range = document.createRange();
+  range.setStart(position.offsetNode, position.offset);
+  range.collapse(true);
+  return range;
+}
+
+function insertTextWithAutoLinks(text) {
+  const fragment = document.createDocumentFragment();
+  const pattern = /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#][^\s<>"']*)?)/gi;
+  let lastIndex = 0;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const before = text.slice(lastIndex, match.index);
+    if (before) fragment.appendChild(document.createTextNode(before));
+    const token = match[0];
+    const trimmedToken = token.replace(/[.,!?;:)\]\u3002\uff0c\uff01\uff1f\uff1b\uff1a]+$/u, "");
+    const trailing = token.slice(trimmedToken.length);
+    const href = normalizeLinkUrl(trimmedToken);
+    fragment.appendChild(href ? createLinkElement(trimmedToken, href) : document.createTextNode(token));
+    if (href && trailing) fragment.appendChild(document.createTextNode(trailing));
+    lastIndex = match.index + match[0].length;
+  }
+  const after = text.slice(lastIndex);
+  if (after) fragment.appendChild(document.createTextNode(after));
+  insertNodeAtSelection(fragment);
+  scheduleSave();
+  pushEditorHistory();
+}
+
+function insertHtmlWithSafeLinks(html) {
+  const template = document.createElement("template");
+  template.innerHTML = String(html || "");
+  template.content.querySelectorAll("script, style, iframe, object, embed, meta, link").forEach((node) => node.remove());
+  template.content.querySelectorAll("*").forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      if (/^on/i.test(attribute.name)) element.removeAttribute(attribute.name);
+    });
+  });
+  sanitizeLinks(template.content);
+  insertNodeAtSelection(template.content);
+  scheduleSave();
+  pushEditorHistory();
+}
+
+function insertOrUpdateLink() {
+  restoreEditorSelection();
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const selectedText = range && editor.contains(range.commonAncestorContainer) ? range.toString().trim() : "";
+  const selectedHref = normalizeLinkUrl(selectedText);
+  const input = window.prompt("연결할 주소를 입력하세요.", selectedHref || "");
+  const href = normalizeLinkUrl(input);
+  if (!href) return;
+  const link = createLinkElement(selectedText || href, href);
+  if (!range || !editor.contains(range.commonAncestorContainer) || range.collapsed) {
+    insertNodeAtSelection(link);
+  } else {
+    range.deleteContents();
+    range.insertNode(link);
+  }
+  const nextRange = document.createRange();
+  nextRange.setStartAfter(link);
+  nextRange.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+  savedEditorRange = nextRange.cloneRange();
+  scheduleSave();
+  pushEditorHistory();
+}
+
+function handleEditorLinkClick(event) {
+  const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+  if (!link || !editor.contains(link)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const href = normalizeLinkUrl(link.getAttribute("href"));
+  if (href) window.memoEdge.openExternal?.(href);
 }
 
 function placeCaretInBlock(block) {
@@ -3133,6 +3814,7 @@ editor.addEventListener("focus", () => {
   scheduleTableToolsRefresh();
 });
 editor.addEventListener("click", (event) => {
+  handleEditorLinkClick(event);
   if (event.target.closest(".check-box")) {
     event.preventDefault();
     toggleChecklistItem(event.target);
@@ -3163,6 +3845,22 @@ document.addEventListener("pointerdown", (event) => {
   ) {
     setTextColorPaletteOpen(false);
   }
+  if (
+    attachmentPanel &&
+    !attachmentPanel.classList.contains("hidden") &&
+    !attachmentPanel.contains(target) &&
+    !attachmentButton?.contains(target)
+  ) {
+    setAttachmentPanelOpen(false);
+  }
+  if (
+    reminderPanel &&
+    !reminderPanel.classList.contains("hidden") &&
+    !reminderPanel.contains(target) &&
+    !reminderButton?.contains(target)
+  ) {
+    setReminderPanelOpen(false);
+  }
   if (editor.contains(target) || tableTools.contains(target) || tablePicker.contains(target) || tableButton.contains(target)) {
     return;
   }
@@ -3176,6 +3874,15 @@ bulletButton.addEventListener("click", () => execCommand("insertUnorderedList"))
 orderedListButton?.addEventListener("click", () => execCommand("insertOrderedList"));
 checkButton.addEventListener("click", insertChecklist);
 clearButton?.addEventListener("click", clearEditorPreservingUndo);
+attachmentButton?.addEventListener("click", () => setAttachmentPanelOpen(attachmentPanel?.classList.contains("hidden")));
+reminderButton?.addEventListener("click", () => setReminderPanelOpen(reminderPanel?.classList.contains("hidden")));
+addAttachmentButton?.addEventListener("click", addAttachmentToDetachedMemo);
+addReminderButton?.addEventListener("click", addOrUpdateReminder);
+[reminderTitleInput, reminderBodyInput, reminderDateTimeInput, reminderRepeatSelect].forEach((control) => {
+  control?.addEventListener("input", () => setReminderStatus(""));
+  control?.addEventListener("change", () => setReminderStatus(""));
+});
+linkButton?.addEventListener("click", insertOrUpdateLink);
 backgroundButton?.addEventListener("click", editBackgroundForDetachedMemo);
 cropperStage?.addEventListener("pointerdown", beginCropDrag);
 cropperStage?.addEventListener("pointermove", moveCropDrag);
@@ -3289,6 +3996,19 @@ window.addEventListener("beforeunload", () => {
 
 window.memoEdge.onDetachedMemoRefresh?.((nextMemo) => {
   if (!memo || nextMemo.id === memo.id) applyMemo(nextMemo);
+});
+
+window.memoEdge.onDetachedToolbarState?.((payload) => {
+  memo = {
+    ...(memo || {}),
+    toolbarButtons: normalizeToolbarButtons(payload?.toolbarButtons),
+    opacityControlsEnabled:
+      payload?.opacityControlsEnabled === undefined
+        ? memo?.opacityControlsEnabled !== false
+        : payload.opacityControlsEnabled !== false
+  };
+  applyToolbarButtonVisibility(memo.toolbarButtons);
+  applyMemoTheme();
 });
 
 async function initialize() {
