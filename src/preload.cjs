@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld("memoEdge", {
   exportData: (payload) => ipcRenderer.invoke("data:export", payload),
   importData: () => ipcRenderer.invoke("data:import"),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+  showEditorContextMenu: () => ipcRenderer.invoke("editor:show-context-menu"),
+  onPasteWithFormat: (callback) => {
+    ipcRenderer.on("editor:paste-with-format", () => callback());
+  },
   onExpandedChanged: (callback) => {
     ipcRenderer.on("shell:expanded-changed", (_, expanded) => callback(Boolean(expanded)));
   },

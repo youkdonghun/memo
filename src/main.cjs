@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } = require("electron");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -1716,6 +1716,34 @@ ipcMain.handle("data:import", async () => {
   } catch (error) {
     return { ok: false, message: String(error?.message || error) };
   }
+});
+
+ipcMain.handle("editor:show-context-menu", (event) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  const sender = event.sender;
+  Menu.buildFromTemplate([
+    { label: "복사", role: "copy" },
+    { label: "붙여넣기", role: "paste" },
+    {
+      label: "서식 유지하여 붙여넣기",
+      enabled: clipboard.availableFormats().length > 0,
+      click: () => {
+        if (sender.isDestroyed()) return;
+        sender.send("editor:paste-with-format");
+        setTimeout(() => {
+          if (sender.isDestroyed()) return;
+          if (typeof sender.paste === "function") {
+            sender.paste();
+            return;
+          }
+          sender.executeJavaScript("document.execCommand('paste')").catch(() => {});
+        }, 0);
+      }
+    },
+    { type: "separator" },
+    { label: "전체선택", role: "selectAll" }
+  ]).popup({ window: targetWindow });
 });
 
 ipcMain.handle("shell:open-external", async (_, url) => {

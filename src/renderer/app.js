@@ -324,6 +324,8 @@ let resizeFrame = null;
 let temporarySettingsPanelWidth = null;
 let savedEditorRange = null;
 let linkPopoverState = null;
+let pasteWithFormatOnce = false;
+let pasteWithFormatTimer = null;
 let handleDragState = null;
 let handleClickTimer = null;
 let sideTitleEditor = null;
@@ -3897,6 +3899,31 @@ function sanitizeLinks(root = editor) {
   });
 }
 
+function stripPastedFontDeclarations(styleText) {
+  return String(styleText || "")
+    .split(";")
+    .map((declaration) => declaration.trim())
+    .filter((declaration) => {
+      const property = declaration.split(":")[0]?.trim().toLowerCase();
+      return property && property !== "font-family" && property !== "font";
+    })
+    .join("; ");
+}
+
+function stripPastedTypography(root) {
+  root.querySelectorAll("[style]").forEach((element) => {
+    const nextStyle = stripPastedFontDeclarations(element.getAttribute("style"));
+    if (nextStyle) {
+      element.setAttribute("style", nextStyle);
+    } else {
+      element.removeAttribute("style");
+    }
+  });
+  root.querySelectorAll("font[face]").forEach((element) => {
+    element.removeAttribute("face");
+  });
+}
+
 function createLinkElement(text, href) {
   const link = document.createElement("a");
   applyLinkAttributes(link, href);
@@ -4082,8 +4109,7 @@ function handleLinkPopoverKeydown(event) {
   }
 }
 
-function insertTextWithAutoLinks(text) {
-  const fragment = document.createDocumentFragment();
+function appendAutoLinkedText(fragment, text) {
   const pattern = /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/gi;
   let lastIndex = 0;
   let match;
@@ -4100,6 +4126,15 @@ function insertTextWithAutoLinks(text) {
   }
   const after = text.slice(lastIndex);
   if (after) fragment.appendChild(document.createTextNode(after));
+}
+
+function insertTextWithAutoLinks(text) {
+  const fragment = document.createDocumentFragment();
+  const lines = String(text || "").split(/\r\n|\r|\n/);
+  lines.forEach((line, index) => {
+    if (index > 0) fragment.appendChild(document.createElement("br"));
+    appendAutoLinkedText(fragment, line);
+  });
   insertNodeAtSelection(fragment);
   persistEditor();
   pushEditorHistory();
@@ -4139,7 +4174,7 @@ function unlinkEditorSelection() {
   pushEditorHistory();
 }
 
-function insertHtmlWithSafeLinks(html) {
+function insertHtmlWithSafeLinks(html, options = {}) {
   const template = document.createElement("template");
   template.innerHTML = String(html || "");
   template.content.querySelectorAll("script, style, iframe, object, embed, meta, link").forEach((node) => node.remove());
@@ -4148,6 +4183,7 @@ function insertHtmlWithSafeLinks(html) {
       if (/^on/i.test(attribute.name)) element.removeAttribute(attribute.name);
     });
   });
+  if (!options.preserveTypography) stripPastedTypography(template.content);
   sanitizeLinks(template.content);
   insertNodeAtSelection(template.content);
   persistEditor();
@@ -6310,6 +6346,27 @@ function shouldHandleEditorPaste(event) {
   return editor.contains(document.activeElement) || selectionBelongsToEditor(range) || selectionBelongsToEditor(savedEditorRange);
 }
 
+function requestPasteWithFormat() {
+  pasteWithFormatOnce = true;
+  if (pasteWithFormatTimer) clearTimeout(pasteWithFormatTimer);
+  pasteWithFormatTimer = setTimeout(() => {
+    pasteWithFormatOnce = false;
+    pasteWithFormatTimer = null;
+  }, 2000);
+  restoreEditorSelection();
+  editor.focus({ preventScroll: true });
+}
+
+function consumePasteWithFormatRequest() {
+  const requested = pasteWithFormatOnce;
+  pasteWithFormatOnce = false;
+  if (pasteWithFormatTimer) {
+    clearTimeout(pasteWithFormatTimer);
+    pasteWithFormatTimer = null;
+  }
+  return requested;
+}
+
 function insertInlineImage(url) {
   restoreEditorSelection();
   const imageLine = document.createElement("div");
@@ -6333,24 +6390,18 @@ async function handleEditorPaste(event) {
   const memo = activeMemo();
   if (!memo || !shouldHandleEditorPaste(event)) return;
 
-  const table = pastedTableFromClipboard(event.clipboardData);
-  if (table) {
-    event.preventDefault();
-    insertPastedTable(table);
-    return;
-  }
-
+  const preserveFormatting = consumePasteWithFormatRequest();
   const file = imageFileFromPaste(event);
   if (!file) {
     const html = event.clipboardData?.getData("text/html") || "";
     const plainText = event.clipboardData?.getData("text/plain") || "";
-    if (htmlContainsLink(html)) {
+    if (preserveFormatting && html) {
       event.preventDefault();
       restoreEditorSelection();
-      insertHtmlWithSafeLinks(html);
+      insertHtmlWithSafeLinks(html, { preserveTypography: true });
       return;
     }
-    if (textContainsAutoLink(plainText)) {
+    if (plainText) {
       event.preventDefault();
       restoreEditorSelection();
       insertTextWithAutoLinks(plainText);
@@ -6372,6 +6423,33 @@ function handleEditorCopy(event) {
   event.preventDefault();
   event.clipboardData.setData("text/html", payload.html);
   event.clipboardData.setData("text/plain", payload.text);
+}
+
+function placeEditorCaretFromContextMenu(event) {
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  if (range && selectionBelongsToEditor(range) && !range.collapsed) {
+    savedEditorRange = range.cloneRange();
+    editor.focus({ preventScroll: true });
+    return;
+  }
+
+  const pointRange = editorRangeFromPoint(event);
+  if (selectionBelongsToEditor(pointRange)) {
+    editor.focus({ preventScroll: true });
+    selection.removeAllRanges();
+    selection.addRange(pointRange);
+    savedEditorRange = pointRange.cloneRange();
+    return;
+  }
+
+  ensureEditorSelectionAtInsertionPoint();
+}
+
+function handleEditorContextMenu(event) {
+  event.preventDefault();
+  placeEditorCaretFromContextMenu(event);
+  window.memoEdge.showEditorContextMenu?.();
 }
 
 async function importFontForApp() {
@@ -6715,6 +6793,7 @@ editor.addEventListener("input", () => {
 });
 editor.addEventListener("keydown", handleEditorKeydown);
 editor.addEventListener("click", handleEditorLinkClick);
+editor.addEventListener("contextmenu", handleEditorContextMenu);
 editor.addEventListener("pointerdown", beginTableCellSelection);
 editor.addEventListener("keyup", () => {
   rememberEditorSelection();
@@ -6879,6 +6958,7 @@ softBackgroundInput?.addEventListener("change", () => {
 });
 document.addEventListener("copy", handleEditorCopy);
 document.addEventListener("paste", handleEditorPaste);
+window.memoEdge.onPasteWithFormat?.(requestPasteWithFormat);
 window.addEventListener("resize", handleCropperWindowResize);
 lengthSelect.addEventListener("change", syncPanelSizeFields);
 anchorSelect.addEventListener("change", syncPanelSizeFields);
