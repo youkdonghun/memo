@@ -4037,7 +4037,7 @@ function prepareChecklistItems(root = editor) {
 function insertNodeAtSelection(node) {
   const lastInsertedNode = node instanceof DocumentFragment ? node.lastChild : node;
   const placeCaretAfterInsertion = () => {
-    if (!lastInsertedNode?.isConnected || !editor.contains(lastInsertedNode)) return;
+    if (!lastInsertedNode?.isConnected || !editor.contains(lastInsertedNode)) return null;
     const nextRange = document.createRange();
     nextRange.setStartAfter(lastInsertedNode);
     nextRange.collapse(true);
@@ -4045,25 +4045,48 @@ function insertNodeAtSelection(node) {
     nextSelection?.removeAllRanges();
     nextSelection?.addRange(nextRange);
     savedEditorRange = nextRange.cloneRange();
+    return nextRange.cloneRange();
   };
 
   const selection = window.getSelection();
   if (!selection || !selection.rangeCount) {
     editor.appendChild(node);
-    placeCaretAfterInsertion();
-    return;
+    return placeCaretAfterInsertion();
   }
 
   const range = selection.getRangeAt(0);
   if (!editor.contains(range.commonAncestorContainer)) {
     editor.appendChild(node);
-    placeCaretAfterInsertion();
-    return;
+    return placeCaretAfterInsertion();
   }
 
   range.deleteContents();
   range.insertNode(node);
-  placeCaretAfterInsertion();
+  return placeCaretAfterInsertion();
+}
+
+function stabilizeCaretAfterPaste(range) {
+  if (!range) return;
+  const caretRange = range.cloneRange();
+  caretRange.collapse(true);
+
+  const collapseToCaret = () => {
+    try {
+      if (!caretRange.startContainer?.isConnected || !editor.contains(caretRange.commonAncestorContainer)) return;
+      editor.focus({ preventScroll: true });
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(caretRange.cloneRange());
+      savedEditorRange = caretRange.cloneRange();
+    } catch {
+      // The pasted nodes may have been replaced by another editor action before the deferred collapse runs.
+    }
+  };
+
+  collapseToCaret();
+  queueMicrotask(collapseToCaret);
+  requestAnimationFrame(collapseToCaret);
+  setTimeout(collapseToCaret, 0);
 }
 
 function isLikelyEmailAddress(value) {
@@ -4380,7 +4403,8 @@ function insertTextWithAutoLinks(text) {
     if (index > 0) fragment.appendChild(document.createElement("br"));
     appendAutoLinkedText(fragment, line);
   });
-  insertNodeAtSelection(fragment);
+  const caretRange = insertNodeAtSelection(fragment);
+  stabilizeCaretAfterPaste(caretRange);
   persistEditor();
   pushEditorHistory();
 }
@@ -4430,7 +4454,8 @@ function insertHtmlWithSafeLinks(html, options = {}) {
   });
   if (!options.preserveTypography) stripPastedTypography(template.content);
   sanitizeLinks(template.content);
-  insertNodeAtSelection(template.content);
+  const caretRange = insertNodeAtSelection(template.content);
+  stabilizeCaretAfterPaste(caretRange);
   persistEditor();
   pushEditorHistory();
 }
