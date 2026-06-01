@@ -767,6 +767,14 @@ function serializedEditorHtml() {
   }, PERF_WARN_MS);
 }
 
+function isEmptyMemoHtml(html) {
+  if (typeof html !== "string" || !html.trim()) return true;
+  const probe = document.createElement("div");
+  probe.innerHTML = html;
+  const text = probe.textContent.replaceAll(CHECK_TEXT_PLACEHOLDER, "").trim();
+  return !text && !probe.querySelector("img, table, input, .check-item");
+}
+
 function detachedMemoPatch(includeHtml = memoHtmlDirty) {
   if (!memo) return null;
   const patch = {
@@ -1051,6 +1059,44 @@ function insertTypingStyleAnchor(range, styles = {}) {
   const { span, textNode } = createTypingStyleAnchor(styles);
   range.insertNode(span);
   setRangeAtTextEnd(textNode);
+}
+
+function typingStylesFromToolbarControls() {
+  const styles = {};
+  styles.fontFamily = fontFamilyCss(fontFamilySelect?.value || memo?.fontFamily || DEFAULT_FONT_FAMILY);
+  styles.fontSize = `${normalizeFontSize(fontSizeSelect?.value || memo?.fontSize || DEFAULT_FONT_SIZE)}px`;
+  const color = normalizeHexColor(textColorInput?.value, "");
+  if (color) styles.color = color;
+  return styles;
+}
+
+function ensureEmptyEditorTypingAnchor() {
+  const range = currentEditorRange();
+  const existingAnchor = typingStyleAnchorAtRange(range);
+  if (existingAnchor) {
+    const textNode =
+      Array.from(existingAnchor.childNodes).find((node) => node.nodeType === Node.TEXT_NODE) ||
+      existingAnchor.appendChild(document.createTextNode(CHECK_TEXT_PLACEHOLDER));
+    if (!textNode.nodeValue) textNode.nodeValue = CHECK_TEXT_PLACEHOLDER;
+    setRangeAtTextEnd(textNode);
+    return;
+  }
+
+  editor.innerHTML = "";
+  const { span, textNode } = createTypingStyleAnchor(typingStylesFromToolbarControls());
+  editor.appendChild(span);
+  setRangeAtTextEnd(textNode);
+}
+
+function preserveEmptyEditorTypingStyleOnDelete(event) {
+  if (event.key !== "Backspace" && event.key !== "Delete") return false;
+  if (!isEmptyMemoHtml(editor.innerHTML)) return false;
+  if (!currentEditorRange() && document.activeElement !== editor) return false;
+  event.preventDefault();
+  ensureEmptyEditorTypingAnchor();
+  rememberEditorSelection();
+  scheduleToolbarRefresh();
+  return true;
 }
 
 function rangeIntersectsNode(range, node) {
@@ -2584,18 +2630,33 @@ function createBlankLine() {
 }
 
 function insertNodeAtSelection(node) {
+  const lastInsertedNode = node instanceof DocumentFragment ? node.lastChild : node;
+  const placeCaretAfterInsertion = () => {
+    if (!lastInsertedNode?.isConnected || !editor.contains(lastInsertedNode)) return;
+    const nextRange = document.createRange();
+    nextRange.setStartAfter(lastInsertedNode);
+    nextRange.collapse(true);
+    const nextSelection = window.getSelection();
+    nextSelection?.removeAllRanges();
+    nextSelection?.addRange(nextRange);
+    savedEditorRange = nextRange.cloneRange();
+  };
+
   const selection = window.getSelection();
   if (!selection || !selection.rangeCount) {
     editor.appendChild(node);
+    placeCaretAfterInsertion();
     return;
   }
   const range = selection.getRangeAt(0);
   if (!editor.contains(range.commonAncestorContainer)) {
     editor.appendChild(node);
+    placeCaretAfterInsertion();
     return;
   }
   range.deleteContents();
   range.insertNode(node);
+  placeCaretAfterInsertion();
 }
 
 function isLikelyEmailAddress(value) {
@@ -4055,6 +4116,7 @@ function handleEditorKeydown(event) {
       return;
     }
   }
+  if (preserveEmptyEditorTypingStyleOnDelete(event)) return;
   handleTableKeydown(event);
   if (event.defaultPrevented) return;
   handleChecklistKeydown(event);

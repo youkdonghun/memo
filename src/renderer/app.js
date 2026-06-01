@@ -1,7 +1,9 @@
 const STORAGE_KEY = "memo-bom-state-v2";
 const LEGACY_STORAGE_KEY = "memo-bom-state-v1";
-const STATE_VERSION = 10;
-const MAX_FLOATING = 5;
+const STATE_VERSION = 11;
+const DEFAULT_FLOATING_LIMIT = 5;
+const MIN_FLOATING_LIMIT = 5;
+const MAX_FLOATING_LIMIT = 7;
 const HOVER_DELAY_MS = 200;
 const HANDLE_CLICK_DELAY_MS = 220;
 const DEFAULT_CYCLE_SHORTCUT = "CommandOrControl+Shift+D";
@@ -37,10 +39,6 @@ const HANDLE_REORDER_THRESHOLD = 8;
 const MAX_RECENT_TEXT_COLORS = 6;
 const MAX_CUSTOM_EMOJI_IMAGES = 24;
 const SOFT_BACKGROUND_OPACITY = 0.62;
-const ATTACHMENT_DELETE_WARNING = "연결된 첨부파일이 있습니다. 삭제 시 첨부파일도 같이 삭제됩니다. 삭제하시겠습니까?";
-const REMINDER_DELETE_WARNING = "등록된 알림이 있습니다. 삭제 시 알림도 같이 삭제됩니다. 삭제하시겠습니까?";
-const ATTACHMENT_AND_REMINDER_DELETE_WARNING =
-  "연결된 첨부파일과 등록된 알림이 있습니다. 삭제 시 첨부파일과 알림도 같이 삭제됩니다. 삭제하시겠습니까?";
 const REMINDER_REPEAT_OPTIONS = ["none", "daily", "weekly", "monthly"];
 const CARRIED_TYPING_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color"];
 const CARRIED_LIST_BLOCK_STYLE_PROPERTIES = ["fontFamily", "fontSize", "color", "lineHeight"];
@@ -230,7 +228,8 @@ const defaultAppPrefs = {
   recentTextColors: [],
   customEmojiImages: [],
   opacityControlsEnabled: true,
-  toolbarButtons: { ...defaultToolbarButtons }
+  toolbarButtons: { ...defaultToolbarButtons },
+  floatingLimit: DEFAULT_FLOATING_LIMIT
 };
 
 function createId() {
@@ -269,6 +268,7 @@ function createMemo(index = 0, defaults = defaultMemoDefaults) {
     attachments: [],
     reminders: [],
     html: "",
+    trashedAt: null,
     createdAt: Date.now(),
     updatedAt: Date.now()
   };
@@ -339,6 +339,7 @@ let pendingNudgeDelta = 0;
 let nudgeFrame = null;
 let railPositionDragState = null;
 let backgroundCropperState = null;
+let panelHeightEnforceTimer = null;
 
 const appShell = document.getElementById("appShell");
 const handleRail = document.getElementById("handleRail");
@@ -349,11 +350,16 @@ const activeSubtitle = document.getElementById("activeSubtitle");
 const allMemosButton = document.getElementById("allMemosButton");
 const activePopupButton = document.getElementById("activePopupButton");
 const activeColorButton = document.getElementById("activeColorButton");
+const trashButton = document.getElementById("trashButton");
 const memoColorPalette = document.getElementById("memoColorPalette");
 const memoListPanel = document.getElementById("memoListPanel");
 const closeMemoListButton = document.getElementById("closeMemoListButton");
 const allMemoList = document.getElementById("allMemoList");
 const allMemoListStatus = document.getElementById("allMemoListStatus");
+const trashPanel = document.getElementById("trashPanel");
+const closeTrashButton = document.getElementById("closeTrashButton");
+const trashList = document.getElementById("trashList");
+const trashStatus = document.getElementById("trashStatus");
 const attachmentButton = document.getElementById("attachmentButton");
 const attachmentCountBadge = document.getElementById("attachmentCountBadge");
 const attachmentPanel = document.getElementById("attachmentPanel");
@@ -457,6 +463,7 @@ const hideShortcutInput = document.getElementById("hideShortcutInput");
 const findShortcutInput = document.getElementById("findShortcutInput");
 const emojiShortcutInput = document.getElementById("emojiShortcutInput");
 const alwaysOnTopInput = document.getElementById("alwaysOnTopInput");
+const floatingLimitSelect = document.getElementById("floatingLimitSelect");
 const startupInput = document.getElementById("startupInput");
 const startupGuideInput = document.getElementById("startupGuideInput");
 const applySettingsButton = document.getElementById("applySettingsButton");
@@ -523,13 +530,14 @@ function migrateLegacyState(raw) {
         attachments: normalizeAttachments(item.attachments),
         reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
-    createdAt: Date.now(),
-    updatedAt: Date.now()
-  }));
+        trashedAt: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }));
 
   if (!indexes.length) return createDefaultState();
 
-  const floatingIds = indexes.slice(0, MAX_FLOATING).map((memo) => memo.id);
+  const floatingIds = indexes.slice(0, DEFAULT_FLOATING_LIMIT).map((memo) => memo.id);
   const activeIndex = Math.max(0, Math.min(Number(raw.activeIndex) || 0, indexes.length - 1));
 
   return normalizeState({
@@ -567,6 +575,7 @@ function normalizeState(raw) {
         attachments: normalizeAttachments(item.attachments),
         reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
+        trashedAt: normalizeTrashTime(item.trashedAt),
         createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
         updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
       }))
@@ -574,12 +583,17 @@ function normalizeState(raw) {
 
   if (!indexes.length) return fallback;
 
-  const validIds = new Set(indexes.map((memo) => memo.id));
+  if (!indexes.some((memo) => !memo.trashedAt)) indexes[0].trashedAt = null;
+
+  const prefs = normalizeAppPrefs(raw.prefs);
+  const floatingLimit = normalizeFloatingLimit(prefs.floatingLimit);
+  const validIds = new Set(indexes.filter((memo) => !memo.trashedAt).map((memo) => memo.id));
   const floatingIds = Array.isArray(raw.floatingIds)
-    ? raw.floatingIds.filter((id, index, arr) => validIds.has(id) && arr.indexOf(id) === index).slice(0, MAX_FLOATING)
+    ? raw.floatingIds.filter((id, index, arr) => validIds.has(id) && arr.indexOf(id) === index).slice(0, floatingLimit)
     : [];
 
-  if (!floatingIds.length) floatingIds.push(indexes[0].id);
+  const firstLiveMemo = indexes.find((memo) => !memo.trashedAt) || indexes[0];
+  if (!floatingIds.length && firstLiveMemo) floatingIds.push(firstLiveMemo.id);
 
   const shell = normalizeShellSettings(raw.shell || {});
 
@@ -589,7 +603,7 @@ function normalizeState(raw) {
     indexes,
     floatingIds,
     memoDefaults: normalizeMemoDefaults(raw.memoDefaults),
-    prefs: normalizeAppPrefs(raw.prefs),
+    prefs,
     shell
   };
 }
@@ -629,6 +643,18 @@ function normalizeLineSpacing(value) {
 function normalizeCommonFontSize(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? clamp(Math.round(numeric), 9, 24) : DEFAULT_COMMON_FONT_SIZE;
+}
+
+function normalizeFloatingLimit(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? clamp(Math.round(numeric), MIN_FLOATING_LIMIT, MAX_FLOATING_LIMIT)
+    : DEFAULT_FLOATING_LIMIT;
+}
+
+function normalizeTrashTime(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
 function normalizeOpacity(value) {
@@ -773,6 +799,26 @@ function normalizePanelHeight(value) {
   return Number.isFinite(numeric) ? clamp(Math.round(numeric), MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT) : DEFAULT_PANEL_HEIGHT;
 }
 
+function floatingPanelMinimumHeight(count = state?.floatingIds?.length || 1) {
+  if (isHorizontalDock()) return MIN_PANEL_HEIGHT;
+  const visibleCount = clamp(Math.max(1, Number(count) || 1), 1, MAX_FLOATING_LIMIT);
+  const handleHeight = 40;
+  const handleGap = 6;
+  const addButtonHeight = 28;
+  const railPadding = 16;
+  return Math.max(
+    MIN_PANEL_HEIGHT,
+    Math.round(visibleCount * handleHeight + Math.max(0, visibleCount - 1) * handleGap + addButtonHeight + railPadding)
+  );
+}
+
+function normalizePanelHeightForFloating(value) {
+  const numeric = Number(value);
+  const fallback = Math.max(DEFAULT_PANEL_HEIGHT, floatingPanelMinimumHeight());
+  const nextHeight = Number.isFinite(numeric) ? Math.round(numeric) : fallback;
+  return clamp(nextHeight, floatingPanelMinimumHeight(), MAX_PANEL_HEIGHT);
+}
+
 function normalizePanelWidth(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? clamp(Math.round(numeric), MIN_PANEL_WIDTH, MAX_PANEL_WIDTH) : DEFAULT_PANEL_WIDTH;
@@ -892,7 +938,8 @@ function normalizeAppPrefs(value = {}) {
     recentTextColors: normalizeTextColorList(value.recentTextColors),
     customEmojiImages: normalizeCustomEmojiImages(value.customEmojiImages),
     opacityControlsEnabled: value.opacityControlsEnabled !== false,
-    toolbarButtons: normalizeToolbarButtons(value.toolbarButtons)
+    toolbarButtons: normalizeToolbarButtons(value.toolbarButtons),
+    floatingLimit: normalizeFloatingLimit(value.floatingLimit)
   };
 }
 
@@ -1119,7 +1166,8 @@ function displayShortcut(accelerator) {
 function syncPanelSizeFields() {
   const isCustom = lengthSelect.value === "custom";
   panelHeightInput.disabled = !isCustom;
-  panelHeightInput.value = String(normalizePanelHeight(panelHeightInput.value || state.shell.panelHeight));
+  panelHeightInput.min = String(floatingPanelMinimumHeight());
+  panelHeightInput.value = String(normalizePanelHeightForFloating(panelHeightInput.value || state.shell.panelHeight));
   if (panelWidthInput) {
     panelWidthInput.value = String(normalizePanelWidth(panelWidthInput.value || state.shell.panelWidth));
   }
@@ -1133,14 +1181,14 @@ function syncPanelSizeFields() {
 async function resizePanelTo(nextSize) {
   const target = typeof nextSize === "object" && nextSize !== null ? nextSize : { height: nextSize };
   const width = normalizePanelWidth(target.width ?? state.shell.panelWidth);
-  const height = normalizePanelHeight(target.height ?? state.shell.panelHeight);
+  const height = normalizePanelHeightForFloating(target.height ?? state.shell.panelHeight);
   const result = await window.memoEdge.setPanelSize({ width, height });
   state.shell = normalizeShellSettings({
     ...state.shell,
     ...(result.settings || {}),
     lengthMode: result.settings?.lengthMode || "custom",
     panelWidth: normalizePanelWidth(result.settings?.panelWidth || width),
-    panelHeight: normalizePanelHeight(result.settings?.panelHeight || height)
+    panelHeight: normalizePanelHeightForFloating(result.settings?.panelHeight || height)
   });
   syncShellLayoutClasses();
 
@@ -1155,7 +1203,7 @@ async function resizePanelTo(nextSize) {
 function queuePanelResize(nextSize) {
   pendingResizeSize = {
     width: normalizePanelWidth(nextSize.width ?? state.shell.panelWidth),
-    height: normalizePanelHeight(nextSize.height ?? state.shell.panelHeight)
+    height: normalizePanelHeightForFloating(nextSize.height ?? state.shell.panelHeight)
   };
   if (resizeFrame) return;
 
@@ -1166,6 +1214,21 @@ function queuePanelResize(nextSize) {
     await resizePanelTo(targetSize);
     if (pendingResizeSize !== null) queuePanelResize(pendingResizeSize);
   });
+}
+
+async function enforceFloatingPanelMinimumHeight() {
+  if (isHorizontalDock() || state.shell?.lengthMode !== "custom") return;
+  const minimumHeight = floatingPanelMinimumHeight();
+  if (normalizePanelHeight(state.shell.panelHeight) >= minimumHeight) return;
+  await resizePanelTo({ width: state.shell.panelWidth, height: minimumHeight });
+}
+
+function scheduleFloatingPanelMinimumHeight() {
+  if (panelHeightEnforceTimer) return;
+  panelHeightEnforceTimer = setTimeout(() => {
+    panelHeightEnforceTimer = null;
+    enforceFloatingPanelMinimumHeight().catch(() => {});
+  }, 0);
 }
 
 function beginPanelResize(event) {
@@ -1184,7 +1247,7 @@ function beginPanelResize(event) {
     startHeight:
       panelRect?.height ||
       (isHorizontalDock()
-        ? normalizePanelHeight(state.shell.panelHeight)
+        ? normalizePanelHeightForFloating(state.shell.panelHeight)
         : window.outerHeight || appShell.getBoundingClientRect().height)
   };
   event.currentTarget?.classList.add("resizing");
@@ -1339,7 +1402,7 @@ function syncBackgroundControls(memo) {
 
 function allReminderPayloads() {
   const now = Date.now();
-  return state.indexes.flatMap((memo) =>
+  return liveMemos().flatMap((memo) =>
     normalizeReminders(memo.reminders)
       .filter((reminder) => reminder.enabled && Number.isFinite(Number(reminder.nextFireAt)))
       .map((reminder) => ({
@@ -1526,12 +1589,52 @@ async function applyImportedState(imported) {
   if (appShell.classList.contains("settings-open")) await fillSettingsForm();
 }
 
+function isMemoTrashed(memo) {
+  return Boolean(normalizeTrashTime(memo?.trashedAt));
+}
+
+function liveMemos() {
+  return state.indexes.filter((memo) => !isMemoTrashed(memo));
+}
+
+function trashedMemos() {
+  return state.indexes.filter(isMemoTrashed).sort((a, b) => Number(b.trashedAt) - Number(a.trashedAt));
+}
+
+function floatingLimit() {
+  return normalizeFloatingLimit(state.prefs?.floatingLimit);
+}
+
+function ensureLiveMemoExists() {
+  if (liveMemos().length) return;
+  const memo = createMemo(state.indexes.length, state.memoDefaults);
+  state.indexes.push(memo);
+  state.activeId = memo.id;
+  state.floatingIds = [memo.id];
+}
+
+function repairFloatingState() {
+  ensureLiveMemoExists();
+  const liveIds = new Set(liveMemos().map((memo) => memo.id));
+  const nextFloatingIds = [];
+  state.floatingIds.forEach((id) => {
+    if (!liveIds.has(id) || nextFloatingIds.includes(id) || nextFloatingIds.length >= floatingLimit()) return;
+    nextFloatingIds.push(id);
+  });
+  if (!nextFloatingIds.length) nextFloatingIds.push(liveMemos()[0].id);
+  state.floatingIds = nextFloatingIds;
+  if (!liveIds.has(state.activeId)) state.activeId = state.floatingIds[0];
+  scheduleFloatingPanelMinimumHeight();
+}
+
 function activeMemo() {
-  return state.indexes.find((memo) => memo.id === state.activeId) || state.indexes[0];
+  repairFloatingState();
+  return liveMemos().find((memo) => memo.id === state.activeId) || liveMemos()[0];
 }
 
 function floatingMemos() {
-  const byId = new Map(state.indexes.map((memo) => [memo.id, memo]));
+  repairFloatingState();
+  const byId = new Map(liveMemos().map((memo) => [memo.id, memo]));
   return state.floatingIds.map((id) => byId.get(id)).filter(Boolean);
 }
 
@@ -2149,7 +2252,7 @@ function endRailPositionDrag(event) {
 
 async function detachMemoToWindow(id) {
   const memo = state.indexes.find((item) => item.id === id);
-  if (!memo || !window.memoEdge.detachMemo) return;
+  if (!memo || isMemoTrashed(memo) || !window.memoEdge.detachMemo) return;
   if (memo.id === state.activeId) flushEditorToMemo();
 
   const floatingIndex = state.floatingIds.indexOf(id);
@@ -2172,10 +2275,10 @@ async function detachMemoToWindow(id) {
     if (state.activeId === id) state.activeId = state.floatingIds[0];
   }
 
-  if (state.activeId === id && state.indexes.length > 1) {
+  if (state.activeId === id && liveMemos().length > 1) {
     const replacementMemo =
-      state.floatingIds.map((floatingId) => state.indexes.find((item) => item.id === floatingId)).find(Boolean) ||
-      state.indexes.find((item) => item.id !== id);
+      state.floatingIds.map((floatingId) => liveMemos().find((item) => item.id === floatingId)).find(Boolean) ||
+      liveMemos().find((item) => item.id !== id);
     if (replacementMemo) state.activeId = replacementMemo.id;
   }
 
@@ -2190,7 +2293,7 @@ function popupActiveMemo() {
 
 function applyDetachedMemoUpdate(payload) {
   const memo = state.indexes.find((item) => item.id === payload?.id);
-  if (!memo) return;
+  if (!memo || isMemoTrashed(memo)) return;
   memo.title = normalizeMemoTitle(payload.title, memo.title || "메모");
   memo.color = normalizeHexColor(payload.color, memo.color);
   memo.fontSize = normalizeFontSize(payload.fontSize);
@@ -2228,20 +2331,23 @@ function applyDetachedMemoUpdate(payload) {
 
 function reattachDetachedMemo(id) {
   const memo = state.indexes.find((item) => item.id === id);
-  if (!memo) return;
+  if (!memo || isMemoTrashed(memo)) {
+    detachedMemoPlacements.delete(id);
+    return;
+  }
   const placement = detachedMemoPlacements.get(id);
   detachedMemoPlacements.delete(id);
 
   if (placement?.wasFloating) {
     state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
-    if (state.floatingIds.length >= MAX_FLOATING) {
-      state.floatingIds = state.floatingIds.slice(0, MAX_FLOATING - 1);
+    if (state.floatingIds.length >= floatingLimit()) {
+      state.floatingIds = state.floatingIds.slice(0, floatingLimit() - 1);
     }
     const insertIndex = clamp(placement.floatingIndex, 0, state.floatingIds.length);
     state.floatingIds.splice(insertIndex, 0, id);
   } else if (placement) {
     state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
-  } else if (!state.floatingIds.includes(id) && state.floatingIds.length < MAX_FLOATING) {
+  } else if (!state.floatingIds.includes(id) && state.floatingIds.length < floatingLimit()) {
     state.floatingIds.push(id);
   }
 
@@ -2278,11 +2384,12 @@ function renderActiveMemo() {
   updateToolbarCommandState();
   renderHandles();
   renderAllMemoList();
+  renderTrashList();
   renderIndexManager();
 }
 
 function selectMemo(id, options = {}) {
-  if (!state.indexes.some((memo) => memo.id === id)) return;
+  if (!liveMemos().some((memo) => memo.id === id)) return;
   if (state.activeId !== id) persistEditor();
   state.activeId = id;
   renderActiveMemo();
@@ -2296,10 +2403,28 @@ function setMemoListOpen(open) {
   allMemosButton.classList.toggle("active", open);
   allMemosButton.setAttribute("aria-expanded", String(Boolean(open)));
   if (open) {
+    setTrashOpen(false);
     closeMemoSearch();
     setAttachmentPanelOpen(false);
     setReminderPanelOpen(false);
     renderAllMemoList();
+  }
+}
+
+function setTrashOpen(open) {
+  if (!trashPanel || !trashButton) return;
+  trashPanel.classList.toggle("hidden", !open);
+  trashButton.classList.toggle("active", Boolean(open));
+  trashButton.setAttribute("aria-expanded", String(Boolean(open)));
+  if (open) {
+    setMemoListOpen(false);
+    closeMemoSearch();
+    setAttachmentPanelOpen(false);
+    setReminderPanelOpen(false);
+    setTextColorPaletteOpen(false);
+    setTablePickerOpen(false);
+    setTableToolsOpen(false);
+    renderTrashList();
   }
 }
 
@@ -2309,6 +2434,16 @@ function setAllMemoListStatus(message, timeout = 2500) {
   if (message && timeout) {
     setTimeout(() => {
       if (allMemoListStatus.textContent === message) allMemoListStatus.textContent = "";
+    }, timeout);
+  }
+}
+
+function setTrashStatus(message, timeout = 2500) {
+  if (!trashStatus) return;
+  trashStatus.textContent = message || "";
+  if (message && timeout) {
+    setTimeout(() => {
+      if (trashStatus.textContent === message) trashStatus.textContent = "";
     }, timeout);
   }
 }
@@ -2396,6 +2531,7 @@ function setAttachmentPanelOpen(open) {
   if (open) {
     setReminderStatus("");
     setMemoListOpen(false);
+    setTrashOpen(false);
     setMemoSearchOpen(false);
     setReminderPanelOpen(false);
     setTextColorPaletteOpen(false);
@@ -2411,6 +2547,7 @@ function setReminderPanelOpen(open) {
   reminderButton.classList.toggle("active", Boolean(open));
   if (open) {
     setMemoListOpen(false);
+    setTrashOpen(false);
     setMemoSearchOpen(false);
     setAttachmentPanelOpen(false);
     setTextColorPaletteOpen(false);
@@ -2688,7 +2825,7 @@ function removeReminder(reminderId) {
 }
 
 function handleReminderFired(payload = {}) {
-  const memo = state.indexes.find((item) => item.id === payload.memoId);
+  const memo = state.indexes.find((item) => item.id === payload.memoId && !isMemoTrashed(item));
   if (!memo) return;
   const slotFireAt = normalizeReminderFireTimeValue(payload.slotFireAt);
   memo.reminders = normalizeReminders(memo.reminders).map((reminder) => {
@@ -2710,7 +2847,7 @@ function handleReminderFired(payload = {}) {
 
 function openMemoFromReminder(payload = {}) {
   const memoId = payload.memoId;
-  if (!state.indexes.some((memo) => memo.id === memoId)) return;
+  if (!liveMemos().some((memo) => memo.id === memoId)) return;
   closeSettings();
   selectMemo(memoId, { focusAtEnd: false });
   setExpanded(true);
@@ -2720,7 +2857,7 @@ function renderAllMemoList() {
   if (!allMemoList) return;
   allMemoList.innerHTML = "";
 
-  state.indexes.forEach((memo, index) => {
+  liveMemos().forEach((memo, index) => {
     const item = document.createElement("div");
     item.className = "all-memo-item";
     if (memo.id === state.activeId) item.classList.add("active");
@@ -2776,6 +2913,58 @@ function renderAllMemoList() {
   });
 }
 
+function renderTrashList() {
+  if (!trashList) return;
+  trashList.innerHTML = "";
+  const items = trashedMemos();
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "memo-search-empty";
+    empty.textContent = "휴지통이 비어 있습니다.";
+    trashList.appendChild(empty);
+    return;
+  }
+
+  items.forEach((memo, index) => {
+    const item = document.createElement("div");
+    item.className = "trash-item";
+
+    const info = document.createElement("div");
+    info.className = "trash-item-info";
+    const title = document.createElement("div");
+    title.className = "trash-title";
+    title.textContent = memo.title || `메모 ${index + 1}`;
+    const meta = document.createElement("div");
+    meta.className = "trash-meta";
+    const attachmentCount = memoAttachmentCount(memo);
+    const reminderCount = memoReminderCount(memo);
+    const counts = [
+      attachmentCount ? `첨부 ${attachmentCount}` : "",
+      reminderCount ? `알림 ${reminderCount}` : ""
+    ].filter(Boolean);
+    meta.textContent = [`삭제됨 ${formatDateTime(memo.trashedAt)}`, ...counts].join(" · ");
+    info.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "trash-actions";
+    const restoreButton = document.createElement("button");
+    restoreButton.type = "button";
+    restoreButton.className = "small-button trash-restore";
+    restoreButton.textContent = "복원";
+    restoreButton.addEventListener("click", () => restoreMemoFromTrash(memo.id));
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "small-button danger trash-permanent-delete";
+    deleteButton.textContent = "완전 삭제";
+    deleteButton.addEventListener("click", () => permanentlyDeleteMemo(memo.id));
+    actions.append(restoreButton, deleteButton);
+
+    item.append(info, actions);
+    trashList.appendChild(item);
+  });
+}
+
 function setMemoSearchOpen(open) {
   if (!memoSearchPanel) return;
   memoSearchPanel.classList.toggle("hidden", !open);
@@ -2798,6 +2987,7 @@ async function openMemoSearch(initialQuery = "") {
   await setExpanded(true);
   closeSettings();
   setMemoListOpen(false);
+  setTrashOpen(false);
   setTextColorPaletteOpen(false);
   setTablePickerOpen(false);
   setTableToolsOpen(false);
@@ -2869,7 +3059,7 @@ function renderMemoSearchResults() {
     return;
   }
 
-  const results = state.indexes
+  const results = liveMemos()
     .map((memo, index) => {
       const text = memoPlainText(memo);
       return {
@@ -3144,6 +3334,46 @@ function insertTypingStyleAnchor(range, styles = {}) {
   const { span, textNode } = createTypingStyleAnchor(styles);
   range.insertNode(span);
   setRangeAtTextEnd(textNode);
+}
+
+function typingStylesFromToolbarControls() {
+  const styles = {};
+  const family = fontFamilyToolbarSelect?.value || activeMemo()?.fontFamily || DEFAULT_FONT_FAMILY;
+  styles.fontFamily = fontFamilyCss(family);
+  const size = normalizeFontSize(fontSizeToolbarSelect?.value || activeMemo()?.fontSize || DEFAULT_FONT_SIZE);
+  styles.fontSize = `${size}px`;
+  const color = normalizeHexColor(textColorInput?.value, "");
+  if (color) styles.color = color;
+  return styles;
+}
+
+function ensureEmptyEditorTypingAnchor() {
+  const range = currentEditorRange();
+  const existingAnchor = typingStyleAnchorAtRange(range);
+  if (existingAnchor) {
+    const textNode =
+      Array.from(existingAnchor.childNodes).find((node) => node.nodeType === Node.TEXT_NODE) ||
+      existingAnchor.appendChild(document.createTextNode(CHECK_TEXT_PLACEHOLDER));
+    if (!textNode.nodeValue) textNode.nodeValue = CHECK_TEXT_PLACEHOLDER;
+    setRangeAtTextEnd(textNode);
+    return;
+  }
+
+  editor.innerHTML = "";
+  const { span, textNode } = createTypingStyleAnchor(typingStylesFromToolbarControls());
+  editor.appendChild(span);
+  setRangeAtTextEnd(textNode);
+}
+
+function preserveEmptyEditorTypingStyleOnDelete(event) {
+  if (event.key !== "Backspace" && event.key !== "Delete") return false;
+  if (!isEmptyMemoHtml(editor.innerHTML)) return false;
+  if (!currentEditorRange() && document.activeElement !== editor) return false;
+  event.preventDefault();
+  ensureEmptyEditorTypingAnchor();
+  rememberEditorSelection();
+  scheduleToolbarRefresh();
+  return true;
 }
 
 function rangeIntersectsNode(range, node) {
@@ -3805,20 +4035,35 @@ function prepareChecklistItems(root = editor) {
 }
 
 function insertNodeAtSelection(node) {
+  const lastInsertedNode = node instanceof DocumentFragment ? node.lastChild : node;
+  const placeCaretAfterInsertion = () => {
+    if (!lastInsertedNode?.isConnected || !editor.contains(lastInsertedNode)) return;
+    const nextRange = document.createRange();
+    nextRange.setStartAfter(lastInsertedNode);
+    nextRange.collapse(true);
+    const nextSelection = window.getSelection();
+    nextSelection?.removeAllRanges();
+    nextSelection?.addRange(nextRange);
+    savedEditorRange = nextRange.cloneRange();
+  };
+
   const selection = window.getSelection();
   if (!selection || !selection.rangeCount) {
     editor.appendChild(node);
+    placeCaretAfterInsertion();
     return;
   }
 
   const range = selection.getRangeAt(0);
   if (!editor.contains(range.commonAncestorContainer)) {
     editor.appendChild(node);
+    placeCaretAfterInsertion();
     return;
   }
 
   range.deleteContents();
   range.insertNode(node);
+  placeCaretAfterInsertion();
 }
 
 function isLikelyEmailAddress(value) {
@@ -5233,6 +5478,7 @@ function handleEditorKeydown(event) {
     }
   }
 
+  if (preserveEmptyEditorTypingStyleOnDelete(event)) return;
   handleTableKeydown(event);
   if (event.defaultPrevented) return;
   handleChecklistKeydown(event);
@@ -5241,9 +5487,9 @@ function handleEditorKeydown(event) {
 
 function addIndex() {
   persistEditor();
-  const memo = createMemo(state.indexes.length, state.memoDefaults);
+  const memo = createMemo(liveMemos().length, state.memoDefaults);
   state.indexes.push(memo);
-  if (state.floatingIds.length < MAX_FLOATING) {
+  if (state.floatingIds.length < floatingLimit()) {
     state.floatingIds.push(memo.id);
   }
   state.activeId = memo.id;
@@ -5273,6 +5519,7 @@ function clearTemporarySettingsPanelWidth() {
 async function openSettings() {
   await setExpanded(true);
   setMemoListOpen(false);
+  setTrashOpen(false);
   closeMemoSearch();
   await applyTemporarySettingsPanelWidth();
   appShell.classList.add("settings-open");
@@ -5511,7 +5758,7 @@ async function fillSettingsForm() {
   lengthSelect.value = state.shell.lengthMode;
   state.memoDefaults = normalizeMemoDefaults(state.memoDefaults);
   state.shell.panelWidth = normalizePanelWidth(state.shell.panelWidth);
-  state.shell.panelHeight = normalizePanelHeight(state.shell.panelHeight);
+  state.shell.panelHeight = normalizePanelHeightForFloating(state.shell.panelHeight);
   if (panelWidthInput) panelWidthInput.value = String(state.shell.panelWidth);
   panelHeightInput.value = String(state.shell.panelHeight);
   if (panelPositionInput) panelPositionInput.value = String(state.shell.edgeOffset);
@@ -5526,6 +5773,7 @@ async function fillSettingsForm() {
   populateLineSpacingSelect(defaultLineSpacingSelect, state.memoDefaults.lineSpacing);
   cycleShortcutInput.value = state.shell.cycleShortcut || DEFAULT_CYCLE_SHORTCUT;
   hideShortcutInput.value = state.shell.hideShortcut || DEFAULT_HIDE_SHORTCUT;
+  if (floatingLimitSelect) floatingLimitSelect.value = String(floatingLimit());
   if (findShortcutInput) findShortcutInput.value = state.shell.findShortcut || DEFAULT_FIND_SHORTCUT;
   if (emojiShortcutInput) emojiShortcutInput.value = state.shell.emojiShortcut || DEFAULT_EMOJI_SHORTCUT;
   cycleShortcutInput.dataset.previousValue = cycleShortcutInput.value;
@@ -5544,9 +5792,10 @@ function renderIndexManager() {
   if (!indexManagerList) return;
   if (!appShell.classList.contains("settings-open")) return;
   indexManagerList.innerHTML = "";
-  floatingLimitText.textContent = `${state.floatingIds.length}/${MAX_FLOATING}개 플로팅 중`;
+  repairFloatingState();
+  floatingLimitText.textContent = `${state.floatingIds.length}/${floatingLimit()}개 플로팅 중`;
 
-  state.indexes.forEach((memo, index) => {
+  liveMemos().forEach((memo, index) => {
     const row = document.createElement("article");
     row.className = "index-item";
     if (memo.id === state.activeId) row.classList.add("active");
@@ -5574,7 +5823,7 @@ function renderIndexManager() {
     floatingInput.type = "checkbox";
     floatingInput.checked = state.floatingIds.includes(memo.id);
     floatingInput.disabled =
-      (!floatingInput.checked && state.floatingIds.length >= MAX_FLOATING) ||
+      (!floatingInput.checked && state.floatingIds.length >= floatingLimit()) ||
       (floatingInput.checked && state.floatingIds.length <= 1);
     floatingInput.addEventListener("change", () => {
       setFloatingMemo(memo.id, floatingInput.checked);
@@ -5748,14 +5997,14 @@ function moveFloatingMemo(id, delta) {
 }
 
 function setFloatingMemo(id, shouldFloat, options = {}) {
-  const exists = state.indexes.some((memo) => memo.id === id);
+  const exists = liveMemos().some((memo) => memo.id === id);
   if (!exists) return false;
   persistEditor();
 
   const alreadyFloating = state.floatingIds.includes(id);
   if (shouldFloat && !alreadyFloating) {
-    if (state.floatingIds.length >= MAX_FLOATING) {
-      if (options.showLimitMessage) setAllMemoListStatus("플로팅 개수는 최대 5개까지만 가능합니다.");
+    if (state.floatingIds.length >= floatingLimit()) {
+      if (options.showLimitMessage) setAllMemoListStatus(`플로팅 개수는 최대 ${floatingLimit()}개까지만 가능합니다.`);
       return false;
     }
     state.floatingIds.push(id);
@@ -5916,7 +6165,7 @@ function actualBackgroundSurfaceSize() {
   }
   return {
     width: normalizePanelWidth(state.shell?.panelWidth),
-    height: normalizePanelHeight(state.shell?.panelHeight)
+    height: normalizePanelHeightForFloating(state.shell?.panelHeight)
   };
 }
 
@@ -6586,19 +6835,37 @@ function memoReminderCount(memo) {
   return normalizeReminders(memo?.reminders).length;
 }
 
-function memoDeleteConfirmMessage(memo) {
+function memoTrashConfirmMessage(memo) {
   const hasAttachments = memoAttachmentCount(memo) > 0;
   const hasReminders = memoReminderCount(memo) > 0;
-  if (hasAttachments && hasReminders) return ATTACHMENT_AND_REMINDER_DELETE_WARNING;
-  if (hasAttachments) return ATTACHMENT_DELETE_WARNING;
-  if (hasReminders) return REMINDER_DELETE_WARNING;
-  return state.indexes.length <= 1 ? "" : `"${memo.title}" 메모를 삭제할까요?`;
+  if (hasAttachments && hasReminders) {
+    return "연결된 첨부파일과 등록된 알림이 있습니다. 메모를 휴지통으로 이동할까요?";
+  }
+  if (hasAttachments) return "연결된 첨부파일이 있습니다. 메모를 휴지통으로 이동할까요?";
+  if (hasReminders) return "등록된 알림이 있습니다. 메모를 휴지통으로 이동할까요?";
+  return `"${memo.title}" 메모를 휴지통으로 이동할까요?`;
+}
+
+function memoPermanentDeleteConfirmMessage(memo) {
+  const hasAttachments = memoAttachmentCount(memo) > 0;
+  const hasReminders = memoReminderCount(memo) > 0;
+  if (hasAttachments && hasReminders) {
+    return "완전 삭제 시 첨부파일과 알림도 같이 삭제됩니다. 정말 완전 삭제하시겠습니까?";
+  }
+  if (hasAttachments) {
+    return "완전 삭제 시 첨부파일도 같이 삭제됩니다. 정말 완전 삭제하시겠습니까?";
+  }
+  if (hasReminders) {
+    return "완전 삭제 시 알림도 같이 삭제됩니다. 정말 완전 삭제하시겠습니까?";
+  }
+  return "정말 완전 삭제하시겠습니까?";
 }
 
 function reportAttachmentFolderDeleteFailure(result) {
   const message = `첨부파일 삭제 실패: ${result?.message || "알 수 없음"}`;
   setSettingsStatus(message, 0);
   setAllMemoListStatus(message, 0);
+  setTrashStatus(message, 0);
   setAttachmentStatus(message, 0);
   window.alert(message);
 }
@@ -6614,49 +6881,61 @@ async function removeMemoAttachmentsBeforeDelete(memo) {
 }
 
 async function deleteIndex(id) {
-  const deleteTarget = state.indexes.find((memo) => memo.id === id);
+  const deleteTarget = state.indexes.find((memo) => memo.id === id && !isMemoTrashed(memo));
   if (!deleteTarget) return;
 
-  const confirmMessage = memoDeleteConfirmMessage(deleteTarget);
+  const confirmMessage = memoTrashConfirmMessage(deleteTarget);
   if (confirmMessage && !window.confirm(confirmMessage)) return;
 
-  if (!(await removeMemoAttachmentsBeforeDelete(deleteTarget))) return;
+  persistEditor();
   detachedMemoPlacements.delete(id);
-
-  if (state.indexes.length <= 1) {
-    const memo = deleteTarget;
-    memo.title = "메모 1";
-    memo.html = "";
-    memo.color = COLOR_PRESETS[0];
-    memo.fontSize = normalizeFontSize(state.memoDefaults?.fontSize);
-    memo.fontFamily = normalizeFontFamily(state.memoDefaults?.fontFamily);
-    memo.lineSpacing = normalizeLineSpacing(state.memoDefaults?.lineSpacing);
-    memo.backgroundImage = "";
-    memo.backgroundSourceImage = "";
-    memo.backgroundCrop = null;
-    memo.backgroundOpacity = 0;
-    memo.backgroundTop = 0;
-    memo.backgroundCoverage = 1;
-    memo.backgroundPositionX = 0.5;
-    memo.backgroundPositionY = 0.5;
-    memo.attachments = [];
-    memo.reminders = [];
-    state.activeId = memo.id;
-    state.floatingIds = [memo.id];
-    renderActiveMemo();
-    saveState();
-    syncRemindersToMain();
-    return;
-  }
-
-  state.indexes = state.indexes.filter((memo) => memo.id !== id);
+  deleteTarget.trashedAt = Date.now();
+  deleteTarget.updatedAt = Date.now();
   state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
-  if (!state.floatingIds.length) state.floatingIds = [state.indexes[0].id];
-  if (state.activeId === id) state.activeId = state.floatingIds[0];
-  window.memoEdge.attachDetachedMemo?.(id)?.catch?.(() => {});
+  if (state.activeId === id) state.activeId = state.floatingIds[0] || liveMemos().find((memo) => memo.id !== id)?.id;
+  await window.memoEdge.attachDetachedMemo?.(id)?.catch?.(() => {});
+  repairFloatingState();
   renderActiveMemo();
+  renderTrashList();
   saveState();
   syncRemindersToMain();
+  setAllMemoListStatus("휴지통으로 이동했습니다.");
+  setTrashStatus("");
+}
+
+function restoreMemoFromTrash(id) {
+  const memo = state.indexes.find((item) => item.id === id && isMemoTrashed(item));
+  if (!memo) return;
+  memo.trashedAt = null;
+  memo.updatedAt = Date.now();
+  if (!state.floatingIds.includes(id) && state.floatingIds.length < floatingLimit()) {
+    state.floatingIds.push(id);
+  }
+  state.activeId = id;
+  repairFloatingState();
+  renderActiveMemo();
+  renderTrashList();
+  saveState();
+  syncRemindersToMain();
+  setTrashStatus("복원했습니다.");
+  setExpanded(true);
+}
+
+async function permanentlyDeleteMemo(id) {
+  const memo = state.indexes.find((item) => item.id === id && isMemoTrashed(item));
+  if (!memo) return;
+  if (!window.confirm(memoPermanentDeleteConfirmMessage(memo))) return;
+  if (!(await removeMemoAttachmentsBeforeDelete(memo))) return;
+  await window.memoEdge.attachDetachedMemo?.(id)?.catch?.(() => {});
+  detachedMemoPlacements.delete(id);
+  state.indexes = state.indexes.filter((item) => item.id !== id);
+  state.floatingIds = state.floatingIds.filter((floatingId) => floatingId !== id);
+  repairFloatingState();
+  renderActiveMemo();
+  renderTrashList();
+  saveState();
+  syncRemindersToMain();
+  setTrashStatus("완전 삭제했습니다.");
 }
 
 async function applySettings() {
@@ -6675,10 +6954,12 @@ async function applySettings() {
     commonFontFamily: commonFontFamilySelect?.value || DEFAULT_FONT_FAMILY,
     commonFontSize: commonFontSizeSelect?.value || DEFAULT_COMMON_FONT_SIZE,
     opacityControlsEnabled: opacityControlsEnabledInput?.checked !== false,
+    floatingLimit: floatingLimitSelect?.value || DEFAULT_FLOATING_LIMIT,
     showLaunchGuideOnStartup: startupGuideInput.checked,
     startupDefaultApplied: true,
     startupUserChoiceSet: false
   });
+  repairFloatingState();
   if (startupInput) startupInput.checked = true;
 
   const shortcutKeys = [cycleShortcut, hideShortcut, findShortcut, emojiShortcut].map((shortcut) => shortcut.toLowerCase());
@@ -6694,7 +6975,7 @@ async function applySettings() {
     edgeOffset: anchorSelect.value === "custom" ? normalizeEdgeOffset(panelPositionInput?.value, state.shell.edgeOffset) : 0,
     lengthMode: lengthSelect.value,
     panelWidth: normalizePanelWidth(panelWidthInput?.value),
-    panelHeight: normalizePanelHeight(panelHeightInput.value),
+    panelHeight: normalizePanelHeightForFloating(panelHeightInput.value),
     cycleShortcut,
     hideShortcut,
     findShortcut,
@@ -6708,9 +6989,12 @@ async function applySettings() {
   await ensureStartupEnabled();
   state.shell = normalizeShellSettings({ ...state.shell, ...(result.settings || nextShell) });
   state.shell.panelWidth = normalizePanelWidth(state.shell.panelWidth);
-  state.shell.panelHeight = normalizePanelHeight(state.shell.panelHeight);
+  state.shell.panelHeight = normalizePanelHeightForFloating(state.shell.panelHeight);
   syncShellLayoutClasses();
   applyCommonTypography();
+  renderHandles();
+  renderAllMemoList();
+  renderIndexManager();
   const memo = activeMemo();
   if (memo) {
     applyMemoTheme(memo);
@@ -6887,9 +7171,11 @@ settingsButton.addEventListener("click", openSettings);
 topmostToggleButton?.addEventListener("click", () => updateAlwaysOnTopSetting(!(state.shell?.alwaysOnTop !== false)));
 closeSettingsButton.addEventListener("click", closeSettings);
 allMemosButton.addEventListener("click", () => setMemoListOpen(memoListPanel.classList.contains("hidden")));
+trashButton?.addEventListener("click", () => setTrashOpen(trashPanel?.classList.contains("hidden")));
 activePopupButton?.addEventListener("click", popupActiveMemo);
 activeColorButton?.addEventListener("click", toggleMemoColorPalette);
 closeMemoListButton.addEventListener("click", () => setMemoListOpen(false));
+closeTrashButton?.addEventListener("click", () => setTrashOpen(false));
 closeMemoSearchButton?.addEventListener("click", closeMemoSearch);
 memoSearchInput?.addEventListener("input", renderMemoSearchResults);
 memoSearchInput?.addEventListener("keydown", (event) => {
@@ -7130,6 +7416,7 @@ async function initialize() {
   await applyWelcomeMemoIfNeeded();
 
   await ensureStartupEnabled();
+  await enforceFloatingPanelMinimumHeight();
 
   if (startupGuideInput) startupGuideInput.checked = state.prefs.showLaunchGuideOnStartup;
   syncShellLayoutClasses();

@@ -23,6 +23,7 @@
               <span class="memo-color-dot" aria-hidden="true"></span>
               <span>색상</span>
             </button>
+            <button id="trashButton" class="memo-list-button memo-trash-button" type="button" title="휴지통" aria-label="휴지통">휴지통</button>
             <p id="activeSubtitle" class="active-subtitle"></p>
           </div>
           <div class="header-actions">
@@ -155,6 +156,15 @@
           <p id="allMemoListStatus" class="all-memo-list-status" role="status" aria-live="polite"></p>
         </div>
 
+        <div id="trashPanel" class="memo-list-panel hidden" aria-label="휴지통">
+          <div class="memo-list-panel-header">
+            <strong>휴지통</strong>
+            <button id="closeTrashButton" class="memo-list-close" type="button" title="닫기">×</button>
+          </div>
+          <div id="trashList" class="trash-list"></div>
+          <p id="trashStatus" class="all-memo-list-status" role="status" aria-live="polite"></p>
+        </div>
+
         <div id="memoSearchPanel" class="memo-search-panel hidden" aria-label="전체 메모 찾기">
           <div class="memo-search-header">
             <strong>전체 메모 찾기</strong>
@@ -253,7 +263,7 @@
           <header class="settings-header">
             <div>
               <h2>설정</h2>
-              <p>플로팅 메모는 최대 5개까지 화면에 고정됩니다.</p>
+              <p>플로팅 메모는 설정에 따라 5~7개까지 화면에 고정됩니다.</p>
             </div>
             <button id="closeSettingsButton" class="icon-button" type="button" title="닫기">×</button>
           </header>
@@ -313,6 +323,15 @@
           <label class="check-field">
             <input id="alwaysOnTopInput" type="checkbox" checked />
             <span>항상 맨 앞에 표시</span>
+          </label>
+
+          <label class="field">
+            <span>플로팅 최대 개수</span>
+            <select id="floatingLimitSelect">
+              <option value="5">5개</option>
+              <option value="6">6개</option>
+              <option value="7">7개</option>
+            </select>
           </label>
 
           <div class="window-placement-fields">

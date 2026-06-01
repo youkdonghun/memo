@@ -623,11 +623,11 @@ button:not(:disabled):not(.edge-handle):active {
   min-width: 0;
   flex: 1 1 0;
   display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto auto auto minmax(0, 1fr);
   grid-template-areas:
-    "all popup color spacer"
-    "divider divider divider divider"
-    "title title title title";
+    "all popup color trash spacer"
+    "divider divider divider divider divider"
+    "title title title title title";
   gap: 3px 6px;
   align-items: start;
 }
@@ -720,6 +720,10 @@ button:not(:disabled):not(.edge-handle):active {
   grid-area: color;
 }
 
+#trashButton {
+  grid-area: trash;
+}
+
 .memo-color-button {
   display: inline-flex;
   align-items: center;
@@ -758,7 +762,7 @@ button:not(:disabled):not(.edge-handle):active {
   }
 
   .title-block {
-    grid-template-columns: auto auto auto minmax(0, 1fr);
+    grid-template-columns: auto auto auto auto minmax(0, 1fr);
     gap: 3px 5px;
   }
 
@@ -806,13 +810,14 @@ button:not(:disabled):not(.edge-handle):active {
   .title-block {
     grid-area: 1 / 1;
     width: 100%;
-    min-height: 60px;
+    min-height: 86px;
     padding-right: 106px;
-    grid-template-columns: auto auto auto minmax(0, 1fr);
+    grid-template-columns: auto auto minmax(0, 1fr);
     grid-template-areas:
-      "all popup color spacer"
-      "divider divider divider divider"
-      "title title title title";
+      "all popup spacer"
+      "color trash spacer"
+      "divider divider divider"
+      "title title title";
     gap: 3px 5px;
   }
 
@@ -1530,7 +1535,8 @@ input.toolbar-line-select {
   line-height: 1;
 }
 
-.all-memo-list {
+.all-memo-list,
+.trash-list {
   display: grid;
   gap: 6px;
   max-height: 164px;
@@ -1538,7 +1544,8 @@ input.toolbar-line-select {
   padding-right: 2px;
 }
 
-.all-memo-item {
+.all-memo-item,
+.trash-item {
   min-height: 34px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1549,6 +1556,10 @@ input.toolbar-line-select {
   padding: 5px;
   background: rgba(255, 255, 255, 0.54);
   color: var(--note-text);
+}
+
+.trash-item {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .all-memo-item.active {
@@ -1593,6 +1604,37 @@ input.toolbar-line-select {
   white-space: nowrap;
 }
 
+.trash-item-info {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.trash-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--note-text);
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
 .all-memo-floating-toggle,
 .all-memo-delete {
   min-width: 48px;
@@ -1612,6 +1654,12 @@ input.toolbar-line-select {
   min-width: 42px;
   border-color: rgba(194, 53, 53, 0.18);
   color: #b42318;
+}
+
+.trash-actions .small-button {
+  height: 26px;
+  padding: 0 7px;
+  font-size: 10px;
 }
 
 .all-memo-floating-toggle.floating {

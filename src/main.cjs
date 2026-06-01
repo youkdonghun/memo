@@ -888,15 +888,24 @@ function buildDetachedWindowMenu() {
   ]);
 }
 
-function createDetachedMemoWindow(memoPayload) {
+function bringDetachedWindowToFront(detachedWindow) {
+  if (!detachedWindow || detachedWindow.isDestroyed()) return;
+  const shouldFloatAbove = settings.alwaysOnTop !== false || shortcutTopmostActive;
+  detachedWindow.setAlwaysOnTop(shouldFloatAbove);
+  if (detachedWindow.isMinimized()) detachedWindow.restore();
+  if (!detachedWindow.isVisible()) detachedWindow.show();
+  if (typeof detachedWindow.moveTop === "function") detachedWindow.moveTop();
+  detachedWindow.focus();
+}
+
+async function createDetachedMemoWindow(memoPayload) {
   const memo = normalizeDetachedMemo(memoPayload);
   detachedMemos.set(memo.id, memo);
 
   const existing = detachedWindows.get(memo.id);
   if (existing && !existing.isDestroyed()) {
-    existing.show();
-    existing.focus();
     existing.webContents.send("memo:detached-refresh", memo);
+    bringDetachedWindowToFront(existing);
     return { ok: true, id: memo.id };
   }
 
@@ -905,6 +914,8 @@ function createDetachedMemoWindow(memoPayload) {
     height: 560,
     minWidth: 300,
     minHeight: 240,
+    show: false,
+    alwaysOnTop: settings.alwaysOnTop !== false || shortcutTopmostActive,
     title: memo.title,
     icon: resolveIconPath() || undefined,
     backgroundColor: "#ffffff",
@@ -919,12 +930,21 @@ function createDetachedMemoWindow(memoPayload) {
   configureWindowIdentity(detachedWindow, "MEMO BOM 팝업");
   detachedWindow.setMenu(buildDetachedWindowMenu());
   detachedWindows.set(memo.id, detachedWindow);
-  detachedWindow.loadFile(path.join(__dirname, "renderer", "detached.html"));
 
   detachedWindow.on("closed", () => {
     detachedWindows.delete(memo.id);
     attachDetachedMemo(memo.id);
   });
+
+  try {
+    await detachedWindow.loadFile(path.join(__dirname, "renderer", "detached.html"));
+    bringDetachedWindowToFront(detachedWindow);
+  } catch (error) {
+    detachedWindows.delete(memo.id);
+    detachedMemos.delete(memo.id);
+    if (!detachedWindow.isDestroyed()) detachedWindow.destroy();
+    return { ok: false, message: String(error?.message || error) };
+  }
 
   return { ok: true, id: memo.id };
 }
