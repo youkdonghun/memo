@@ -671,8 +671,11 @@ function populateLineSpacingSelect(select, currentSpacing) {
 function applyMemoTheme() {
   const { color, backgroundImage, top, coverage, positionX, positionY, imageOpacity, outsideColorAlpha, panelColorAlpha } =
     backgroundTransparencyState(memo);
+  const text = readableTextColor(color);
   document.documentElement.style.setProperty("--note-bg", color);
-  document.documentElement.style.setProperty("--note-text", readableTextColor(color));
+  document.documentElement.style.setProperty("--note-text", text);
+  document.documentElement.style.setProperty("--memo-text", text);
+  document.documentElement.style.setProperty("--memo-caret", text);
   document.documentElement.style.setProperty("--accent", accentColor(color));
   document.documentElement.style.setProperty("--memo-bg-image", backgroundImage ? `url("${backgroundImage.replace(/"/g, "%22")}")` : "none");
   document.documentElement.style.setProperty("--memo-bg-opacity", String(imageOpacity));

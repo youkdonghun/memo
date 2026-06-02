@@ -268,6 +268,7 @@ function createMemo(index = 0, defaults = defaultMemoDefaults) {
     attachments: [],
     reminders: [],
     html: "",
+    scrollTop: 0,
     trashedAt: null,
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -340,6 +341,7 @@ let nudgeFrame = null;
 let railPositionDragState = null;
 let backgroundCropperState = null;
 let panelHeightEnforceTimer = null;
+let editorScrollSaveFrame = null;
 
 const appShell = document.getElementById("appShell");
 const handleRail = document.getElementById("handleRail");
@@ -530,6 +532,7 @@ function migrateLegacyState(raw) {
         attachments: normalizeAttachments(item.attachments),
         reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
+        scrollTop: normalizeMemoScrollTop(item.scrollTop),
         trashedAt: null,
         createdAt: Date.now(),
         updatedAt: Date.now()
@@ -575,6 +578,7 @@ function normalizeState(raw) {
         attachments: normalizeAttachments(item.attachments),
         reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
+        scrollTop: normalizeMemoScrollTop(item.scrollTop),
         trashedAt: normalizeTrashTime(item.trashedAt),
         createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
         updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now()
@@ -627,6 +631,11 @@ function normalizeHexColor(value, fallback) {
   const trimmed = value.trim();
   if (/^#[0-9a-f]{6}$/i.test(trimmed)) return trimmed.toLowerCase();
   return fallback;
+}
+
+function normalizeMemoScrollTop(value) {
+  const scrollTop = Number(value);
+  return Number.isFinite(scrollTop) && scrollTop > 0 ? Math.round(scrollTop) : 0;
 }
 
 function normalizeFontSize(value) {
@@ -1475,6 +1484,7 @@ function saveState(options = {}) {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
+  recordActiveMemoScroll({ scheduleSave: false });
   if (options.flushEditor !== false) flushEditorToMemo({ scheduleSave: false });
   const nextStateJson = measureInteraction("saveState.stringify", () => JSON.stringify(state), PERF_SLOW_WARN_MS);
   if (nextStateJson !== lastSavedStateJson) {
@@ -1638,6 +1648,37 @@ function floatingMemos() {
   return state.floatingIds.map((id) => byId.get(id)).filter(Boolean);
 }
 
+function recordActiveMemoScroll(options = {}) {
+  const memo = activeMemo();
+  if (!memo || !editor) return;
+  const nextScrollTop = normalizeMemoScrollTop(editor.scrollTop);
+  if (memo.scrollTop === nextScrollTop) return;
+  memo.scrollTop = nextScrollTop;
+  if (options.scheduleSave !== false) scheduleSave();
+}
+
+function restoreMemoScroll(memo) {
+  const targetScrollTop = normalizeMemoScrollTop(memo?.scrollTop);
+  const applyScroll = () => {
+    const maxScrollTop = Math.max(0, editor.scrollHeight - editor.clientHeight);
+    editor.scrollTop = Math.min(targetScrollTop, maxScrollTop);
+  };
+
+  applyScroll();
+  requestAnimationFrame(() => {
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+  });
+}
+
+function scheduleActiveMemoScrollSave() {
+  if (editorScrollSaveFrame) cancelAnimationFrame(editorScrollSaveFrame);
+  editorScrollSaveFrame = requestAnimationFrame(() => {
+    editorScrollSaveFrame = null;
+    recordActiveMemoScroll();
+  });
+}
+
 function markEditorDirty() {
   const memo = activeMemo();
   if (!memo || applyingHistory) return;
@@ -1791,6 +1832,8 @@ function applyMemoTheme(memo) {
   const text = readableTextColor(color);
   document.documentElement.style.setProperty("--note-bg", color);
   document.documentElement.style.setProperty("--note-text", text);
+  document.documentElement.style.setProperty("--memo-text", text);
+  document.documentElement.style.setProperty("--memo-caret", text);
   document.documentElement.style.setProperty("--accent", accentColor(color));
   document.documentElement.style.setProperty("--active-memo-color", color);
   document.documentElement.style.setProperty("--memo-bg-image", backgroundImage ? `url("${backgroundImage.replace(/"/g, "%22")}")` : "none");
@@ -2378,6 +2421,7 @@ function renderActiveMemo() {
   clearTableSelection();
   editor.innerHTML = memo.html || "";
   editorDirty = false;
+  restoreMemoScroll(memo);
   lastRenderedTableSelection = { table: null, cells: new Set(), activeCell: null };
   prepareChecklistItems();
   resetEditorHistory();
@@ -2390,7 +2434,10 @@ function renderActiveMemo() {
 
 function selectMemo(id, options = {}) {
   if (!liveMemos().some((memo) => memo.id === id)) return;
-  if (state.activeId !== id) persistEditor();
+  if (state.activeId !== id) {
+    recordActiveMemoScroll({ scheduleSave: false });
+    persistEditor();
+  }
   state.activeId = id;
   renderActiveMemo();
   saveState();
@@ -3224,7 +3271,7 @@ function scheduleTableToolsRefresh() {
   });
 }
 
-function focusEditorAtEnd() {
+function focusEditorAtEnd(options = {}) {
   if (!editor) return;
   editor.focus({ preventScroll: true });
   const range = document.createRange();
@@ -3234,13 +3281,14 @@ function focusEditorAtEnd() {
   selection.removeAllRanges();
   selection.addRange(range);
   savedEditorRange = range.cloneRange();
-  editor.scrollTop = editor.scrollHeight;
+  if (options.scrollToEnd) editor.scrollTop = editor.scrollHeight;
+  else restoreMemoScroll(activeMemo());
   updateToolbarCommandState();
 }
 
-function scheduleEditorFocusAtEnd() {
+function scheduleEditorFocusAtEnd(options = {}) {
   requestAnimationFrame(() => {
-    requestAnimationFrame(focusEditorAtEnd);
+    requestAnimationFrame(() => focusEditorAtEnd(options));
   });
 }
 
@@ -7104,6 +7152,7 @@ editor.addEventListener("keydown", handleEditorKeydown);
 editor.addEventListener("click", handleEditorLinkClick);
 editor.addEventListener("contextmenu", handleEditorContextMenu);
 editor.addEventListener("pointerdown", beginTableCellSelection);
+editor.addEventListener("scroll", scheduleActiveMemoScrollSave);
 editor.addEventListener("keyup", () => {
   rememberEditorSelection();
   scheduleToolbarRefresh();

@@ -9,6 +9,7 @@
   --common-font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --common-font-size: 12px;
   --memo-text: #283044;
+  --memo-caret: #283044;
   --memo-font-family: "Gulim", "Malgun Gothic", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --memo-font-size: 15px;
   --memo-line-height: 1;
@@ -1988,7 +1989,13 @@ input.toolbar-line-select {
   font-size: var(--memo-font-size);
   line-height: var(--memo-line-height);
   color: var(--memo-text);
+  caret-color: var(--memo-caret);
   word-break: break-word;
+  transition: box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.memo-editor:focus {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--memo-caret) 42%, transparent);
 }
 
 .memo-editor * {
