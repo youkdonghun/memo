@@ -3,7 +3,7 @@ const APP_STORAGE_KEY = "memo-bom-state-v2";
 const DEFAULT_FONT_FAMILY = "Gulim";
 const DEFAULT_FONT_SIZE = 15;
 const DEFAULT_LINE_SPACING = 1.5;
-const DEFAULT_EMOJI_SHORTCUT = "CommandOrControl+Shift+E";
+const DEFAULT_EMOJI_SHORTCUT = "";
 const MAX_PASTED_TABLE_ROWS = 80;
 const MAX_PASTED_TABLE_COLS = 40;
 const SAVE_DEBOUNCE_MS = 450;
@@ -4404,6 +4404,18 @@ window.memoEdge.onDetachedMemoRefresh?.((nextMemo) => {
   if (!memo || nextMemo.id === memo.id) applyMemo(nextMemo);
 });
 
+window.memoEdge.onOpenEmoji?.(() => {
+  rememberEditorSelection();
+  toggleEmojiPalette();
+});
+window.memoEdge.onDeleteMemo?.(async () => {
+  await saveNow();
+  await window.memoEdge.requestDetachedMemoDelete();
+});
+window.memoEdge.onShortcutSettingsChanged?.((settings) => {
+  emojiShortcut = typeof settings.emojiShortcut === "string" ? settings.emojiShortcut : "";
+});
+
 window.memoEdge.onDetachedToolbarState?.((payload) => {
   memo = {
     ...(memo || {}),
@@ -4421,7 +4433,7 @@ async function initialize() {
   try {
     const shellState = await window.memoEdge.getShellState?.();
     const nextShortcut = shellState?.settings?.emojiShortcut;
-    if (typeof nextShortcut === "string" && nextShortcut.trim()) {
+    if (typeof nextShortcut === "string") {
       emojiShortcut = nextShortcut.trim();
     }
   } catch {

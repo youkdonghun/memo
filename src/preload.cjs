@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("memoEdge", {
   setTemporaryPanelWidth: (width) => ipcRenderer.invoke("shell:set-temporary-panel-width", width),
   setSideTitleEditOpen: (open) => ipcRenderer.invoke("shell:set-side-title-edit-open", open),
   updateSettings: (settings) => ipcRenderer.invoke("shell:update-settings", settings),
+  setShortcutCapture: (active) => ipcRenderer.invoke("shell:set-shortcut-capture", active),
+  requestDetachedMemoDelete: () => ipcRenderer.invoke("memo:detached-request-delete"),
   setPanelHeight: (height) => ipcRenderer.invoke("shell:set-panel-height", height),
   setPanelSize: (size) => ipcRenderer.invoke("shell:set-panel-size", size),
   nudgeEdge: (delta) => ipcRenderer.invoke("shell:nudge-edge", delta),
@@ -44,6 +46,15 @@ contextBridge.exposeInMainWorld("memoEdge", {
   },
   onCycleFloating: (callback) => {
     ipcRenderer.on("shortcut:cycle-floating", () => callback());
+  },
+  onNewMemo: (callback) => {
+    ipcRenderer.on("shortcut:new-memo", () => callback());
+  },
+  onDeleteMemo: (callback) => {
+    ipcRenderer.on("shortcut:delete-memo", (_, id) => callback(id));
+  },
+  onShortcutSettingsChanged: (callback) => {
+    ipcRenderer.on("shell:shortcuts-changed", (_, settings) => callback(settings));
   },
   onOpenSettings: (callback) => {
     ipcRenderer.on("shell:open-settings", () => callback());

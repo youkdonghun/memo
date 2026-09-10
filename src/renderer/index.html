@@ -103,7 +103,7 @@
                 <path d="M14.8 10.8a3.4 3.4 0 0 1 0 4.8L13 17.4a3.4 3.4 0 1 1-4.8-4.8l1-1"></path>
               </svg>
             </button>
-            <button id="emojiButton" class="tool-button" data-toolbar-key="emoji" type="button" title="이모티콘 (Ctrl+Shift+E)" aria-label="이모티콘">
+            <button id="emojiButton" class="tool-button" data-toolbar-key="emoji" type="button" title="이모티콘" aria-label="이모티콘">
               <span class="emoji-tool-icon" aria-hidden="true">☺</span>
             </button>
           </div>
@@ -408,8 +408,19 @@
 
           <label class="field">
             <span>이모티콘 열기</span>
-            <input id="emojiShortcutInput" class="shortcut-input" type="text" placeholder="CommandOrControl+Shift+E" readonly />
+            <input id="emojiShortcutInput" class="shortcut-input" type="text" placeholder="미지정" readonly />
           </label>
+
+          <label class="field">
+            <span>새 메모 만들기</span>
+            <input id="newMemoShortcutInput" class="shortcut-input" type="text" placeholder="미지정" readonly />
+          </label>
+
+          <label class="field">
+            <span>현재 메모 삭제 (휴지통으로 이동)</span>
+            <input id="deleteMemoShortcutInput" class="shortcut-input" type="text" placeholder="미지정" readonly />
+          </label>
+          <p class="hint-text">입력란을 누르고 원하는 키 조합을 입력하세요. 새 메모·삭제·이모티콘은 Backspace 또는 Delete로 비우면 단축키가 해제됩니다. 삭제는 메모 창이 활성화되어 있을 때만 동작합니다.</p>
 
           <label class="check-field">
             <input id="startupInput" type="checkbox" checked />

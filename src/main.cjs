@@ -29,7 +29,9 @@ const DEFAULT_SETTINGS = {
   cycleShortcut: "CommandOrControl+Shift+D",
   hideShortcut: "CommandOrControl+Shift+F",
   findShortcut: "CommandOrControl+F",
-  emojiShortcut: "CommandOrControl+Shift+E",
+  emojiShortcut: "",
+  newMemoShortcut: "CommandOrControl+Shift+E",
+  deleteMemoShortcut: "",
   alwaysOnTop: true,
   anchor: "middle",
   manualYOffset: 0,
@@ -61,9 +63,8 @@ let mainWindow = null;
 let tray = null;
 let settings = { ...DEFAULT_SETTINGS };
 let expanded = false;
-let registeredCycleShortcut = null;
-let registeredHideShortcut = null;
-let registeredEmojiShortcut = null;
+const registeredShortcuts = new Set();
+let shortcutCaptureActive = false;
 let followDisplayTimer = null;
 let isQuitting = false;
 let settingsOpen = false;
@@ -98,6 +99,12 @@ function loadSettings() {
   try {
     const raw = fs.readFileSync(settingsPath(), "utf8");
     const parsed = JSON.parse(raw);
+    if (typeof parsed.newMemoShortcut !== "string") {
+      parsed.newMemoShortcut = DEFAULT_SETTINGS.newMemoShortcut;
+      if (/^(CommandOrControl|Control|Ctrl|Command|Cmd)\+Shift\+E$/i.test(parsed.emojiShortcut || "")) {
+        parsed.emojiShortcut = "";
+      }
+    }
     settings = normalizeSettings(parsed);
   } catch {
     settings = { ...DEFAULT_SETTINGS };
@@ -178,6 +185,8 @@ function normalizeSettings(partial = {}) {
       typeof merged.emojiShortcut === "string" && merged.emojiShortcut.trim()
         ? merged.emojiShortcut.trim()
         : DEFAULT_SETTINGS.emojiShortcut,
+    newMemoShortcut: typeof merged.newMemoShortcut === "string" ? merged.newMemoShortcut.trim() : DEFAULT_SETTINGS.newMemoShortcut,
+    deleteMemoShortcut: typeof merged.deleteMemoShortcut === "string" ? merged.deleteMemoShortcut.trim() : "",
     alwaysOnTop: merged.alwaysOnTop !== false,
     anchor: anchorAlias,
     manualYOffset:
@@ -951,58 +960,46 @@ async function createDetachedMemoWindow(memoPayload) {
 }
 
 function unregisterShortcuts() {
-  if (registeredCycleShortcut) {
-    globalShortcut.unregister(registeredCycleShortcut);
-    registeredCycleShortcut = null;
-  }
-  if (registeredHideShortcut) {
-    globalShortcut.unregister(registeredHideShortcut);
-    registeredHideShortcut = null;
-  }
-  if (registeredEmojiShortcut) {
-    globalShortcut.unregister(registeredEmojiShortcut);
-    registeredEmojiShortcut = null;
-  }
+  registeredShortcuts.forEach((shortcut) => globalShortcut.unregister(shortcut));
+  registeredShortcuts.clear();
 }
 
 function registerShortcuts() {
   unregisterShortcuts();
-
-  const cycleRegistered = globalShortcut.register(settings.cycleShortcut, () => {
-    sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true });
-  });
-
-  const hideRegistered = globalShortcut.register(settings.hideShortcut, () => {
-    setExpanded(false);
-  });
-
-  const emojiRegistered = globalShortcut.register(settings.emojiShortcut, () => {
-    shortcutTopmostActive = true;
-    setExpanded(true);
-    sendRendererCommand("shortcut:open-emoji", { forceTopmost: true });
-  });
-
-  if (cycleRegistered) registeredCycleShortcut = settings.cycleShortcut;
-  if (hideRegistered) registeredHideShortcut = settings.hideShortcut;
-  if (emojiRegistered) registeredEmojiShortcut = settings.emojiShortcut;
-
-  return {
-    cycle: {
-      ok: cycleRegistered,
-      shortcut: settings.cycleShortcut,
-      message: cycleRegistered ? "" : `단축키 등록 실패: ${settings.cycleShortcut}`
+  if (shortcutCaptureActive) return {};
+  const callbacks = {
+    cycle: () => sendRendererCommand("shortcut:cycle-floating", { forceTopmost: true }),
+    hide: () => setExpanded(false),
+    emoji: () => {
+      const focused = BrowserWindow.getFocusedWindow();
+      if (focused?.__memoId) {
+        focused.webContents.send("shortcut:open-emoji");
+        return;
+      }
+      setExpanded(true);
+      sendRendererCommand("shortcut:open-emoji", { forceTopmost: true });
     },
-    hide: {
-      ok: hideRegistered,
-      shortcut: settings.hideShortcut,
-      message: hideRegistered ? "" : `단축키 등록 실패: ${settings.hideShortcut}`
-    },
-    emoji: {
-      ok: emojiRegistered,
-      shortcut: settings.emojiShortcut,
-      message: emojiRegistered ? "" : `단축키 등록 실패: ${settings.emojiShortcut}`
+    newMemo: () => sendRendererCommand("shortcut:new-memo", { forceTopmost: true }),
+    deleteMemo: () => {
+      const focused = BrowserWindow.getFocusedWindow();
+      if (!focused || (focused !== mainWindow && !focused.__memoId)) return;
+      if (focused === mainWindow && (!expanded || settingsOpen)) return;
+      focused.webContents.send("shortcut:delete-memo");
     }
   };
+  return Object.fromEntries(Object.entries(callbacks).map(([name, callback]) => {
+    const shortcut = settings[`${name}Shortcut`];
+    let ok = !shortcut;
+    if (shortcut) {
+      try {
+        ok = globalShortcut.register(shortcut, callback);
+      } catch {
+        ok = false;
+      }
+      if (ok) registeredShortcuts.add(shortcut);
+    }
+    return [name, { ok, shortcut, message: ok ? "" : `단축키 등록 실패: ${shortcut}` }];
+  }));
 }
 
 function refreshTrayMenu() {
@@ -1400,6 +1397,11 @@ function createMainWindow() {
     event.preventDefault();
     hideWindowToTray();
   });
+  mainWindow.on("blur", () => {
+    if (!shortcutCaptureActive) return;
+    shortcutCaptureActive = false;
+    registerShortcuts();
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -1470,6 +1472,13 @@ ipcMain.handle("shell:set-settings-open", (_, nextOpen) => setSettingsOpen(nextO
 ipcMain.handle("shell:set-temporary-panel-width", (_, nextWidth) => setTemporaryPanelWidth(nextWidth));
 ipcMain.handle("shell:set-side-title-edit-open", (_, nextOpen) => setSideTitleEditOpen(nextOpen));
 
+ipcMain.handle("shell:set-shortcut-capture", (event, active) => {
+  if (event.sender !== mainWindow?.webContents) return { ok: false };
+  shortcutCaptureActive = Boolean(active);
+  registerShortcuts();
+  return { ok: true };
+});
+
 ipcMain.handle("shell:update-settings", (_, partialSettings = {}) => {
   settings = normalizeSettings(partialSettings);
   if (settings.edgeAnchor !== "custom") {
@@ -1482,6 +1491,7 @@ ipcMain.handle("shell:update-settings", (_, partialSettings = {}) => {
   refreshWindowBounds(true);
   applyWindowVisibility();
   refreshTrayMenu();
+  detachedWindows.forEach((target) => target.webContents.send("shell:shortcuts-changed", settings));
   return { ok: true, settings, shortcutStatus };
 });
 
@@ -1564,6 +1574,15 @@ ipcMain.handle("memo:detached-get", (event) => ({
   ok: true,
   memo: detachedMemoForSender(event.sender)
 }));
+
+ipcMain.handle("memo:detached-request-delete", (event) => {
+  const memo = detachedMemoForSender(event.sender);
+  if (!memo || !mainWindow || mainWindow.isDestroyed()) return { ok: false };
+  setExpanded(true);
+  showWindow({ forceTopmost: true });
+  mainWindow.webContents.send("shortcut:delete-memo", memo.id);
+  return { ok: true };
+});
 
 ipcMain.handle("memo:detached-update", (event, memoPatch = {}) => {
   const current = detachedMemoForSender(event.sender);

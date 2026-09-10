@@ -9,7 +9,8 @@ const HANDLE_CLICK_DELAY_MS = 220;
 const DEFAULT_CYCLE_SHORTCUT = "CommandOrControl+Shift+D";
 const DEFAULT_HIDE_SHORTCUT = "CommandOrControl+Shift+F";
 const DEFAULT_FIND_SHORTCUT = "CommandOrControl+F";
-const DEFAULT_EMOJI_SHORTCUT = "CommandOrControl+Shift+E";
+const DEFAULT_EMOJI_SHORTCUT = "";
+const DEFAULT_NEW_MEMO_SHORTCUT = "CommandOrControl+Shift+E";
 const DEFAULT_FONT_SIZE = 15;
 const DEFAULT_COMMON_FONT_SIZE = 12;
 const DEFAULT_FONT_FAMILY = "Gulim";
@@ -203,6 +204,8 @@ const defaultShellSettings = {
   hideShortcut: DEFAULT_HIDE_SHORTCUT,
   findShortcut: DEFAULT_FIND_SHORTCUT,
   emojiShortcut: DEFAULT_EMOJI_SHORTCUT,
+  newMemoShortcut: DEFAULT_NEW_MEMO_SHORTCUT,
+  deleteMemoShortcut: "",
   alwaysOnTop: true,
   anchor: "middle",
   manualYOffset: 0,
@@ -465,6 +468,8 @@ const cycleShortcutInput = document.getElementById("cycleShortcutInput");
 const hideShortcutInput = document.getElementById("hideShortcutInput");
 const findShortcutInput = document.getElementById("findShortcutInput");
 const emojiShortcutInput = document.getElementById("emojiShortcutInput");
+const newMemoShortcutInput = document.getElementById("newMemoShortcutInput");
+const deleteMemoShortcutInput = document.getElementById("deleteMemoShortcutInput");
 const alwaysOnTopInput = document.getElementById("alwaysOnTopInput");
 const floatingLimitSelect = document.getElementById("floatingLimitSelect");
 const startupInput = document.getElementById("startupInput");
@@ -888,9 +893,13 @@ function normalizeShellSettings(value = {}) {
         ? value.findShortcut.trim()
         : DEFAULT_FIND_SHORTCUT,
     emojiShortcut:
-      typeof value.emojiShortcut === "string" && value.emojiShortcut.trim()
+      typeof value.newMemoShortcut !== "string" && /^(CommandOrControl|Control|Ctrl|Command|Cmd)\+Shift\+E$/i.test(value.emojiShortcut || "")
+        ? ""
+        : typeof value.emojiShortcut === "string" && value.emojiShortcut.trim()
         ? value.emojiShortcut.trim()
         : DEFAULT_EMOJI_SHORTCUT,
+    newMemoShortcut: typeof value.newMemoShortcut === "string" ? value.newMemoShortcut.trim() : DEFAULT_NEW_MEMO_SHORTCUT,
+    deleteMemoShortcut: typeof value.deleteMemoShortcut === "string" ? value.deleteMemoShortcut.trim() : "",
     alwaysOnTop: value.alwaysOnTop !== false,
     followCursorDisplay: value.followCursorDisplay === true,
     targetDisplayId: typeof value.targetDisplayId === "number" ? value.targetDisplayId : null
@@ -5733,22 +5742,25 @@ function acceleratorFromEvent(event) {
 }
 
 function setupShortcutCapture(input, fallbackValue) {
-  input.dataset.previousValue = input.value || fallbackValue;
+  input.dataset.previousValue = input.value;
   input.addEventListener("focus", () => {
-    input.dataset.previousValue = input.value || fallbackValue;
+    input.dataset.previousValue = input.value;
+    window.memoEdge.setShortcutCapture?.(true);
     input.select();
   });
+  input.addEventListener("blur", () => window.memoEdge.setShortcutCapture?.(false));
   input.addEventListener("keydown", (event) => {
+    if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) return;
     event.preventDefault();
     event.stopPropagation();
 
     if (event.key === "Escape") {
-      input.value = input.dataset.previousValue || fallbackValue;
+      input.value = input.dataset.previousValue ?? fallbackValue;
       input.blur();
       return;
     }
 
-    if (event.key === "Backspace" || event.key === "Delete") {
+    if ((event.key === "Backspace" || event.key === "Delete") && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
       input.value = "";
       return;
     }
@@ -5756,7 +5768,6 @@ function setupShortcutCapture(input, fallbackValue) {
     const accelerator = acceleratorFromEvent(event);
     if (!accelerator) return;
     input.value = accelerator;
-    input.dataset.previousValue = accelerator;
   });
 }
 
@@ -5861,6 +5872,8 @@ async function fillSettingsForm() {
   if (floatingLimitSelect) floatingLimitSelect.value = String(floatingLimit());
   if (findShortcutInput) findShortcutInput.value = state.shell.findShortcut || DEFAULT_FIND_SHORTCUT;
   if (emojiShortcutInput) emojiShortcutInput.value = state.shell.emojiShortcut || DEFAULT_EMOJI_SHORTCUT;
+  newMemoShortcutInput.value = state.shell.newMemoShortcut ?? DEFAULT_NEW_MEMO_SHORTCUT;
+  deleteMemoShortcutInput.value = state.shell.deleteMemoShortcut ?? "";
   cycleShortcutInput.dataset.previousValue = cycleShortcutInput.value;
   hideShortcutInput.dataset.previousValue = hideShortcutInput.value;
   if (findShortcutInput) findShortcutInput.dataset.previousValue = findShortcutInput.value;
@@ -7029,6 +7042,8 @@ async function applySettings() {
   const hideShortcut = hideShortcutInput.value.trim() || DEFAULT_HIDE_SHORTCUT;
   const findShortcut = findShortcutInput?.value.trim() || DEFAULT_FIND_SHORTCUT;
   const emojiShortcut = emojiShortcutInput?.value.trim() || DEFAULT_EMOJI_SHORTCUT;
+  const newMemoShortcut = newMemoShortcutInput.value.trim();
+  const deleteMemoShortcut = deleteMemoShortcutInput.value.trim();
   state.memoDefaults = normalizeMemoDefaults({
     fontFamily: defaultFontFamilySelect.value,
     fontSize: defaultFontSizeSelect.value,
@@ -7047,7 +7062,8 @@ async function applySettings() {
   repairFloatingState();
   if (startupInput) startupInput.checked = true;
 
-  const shortcutKeys = [cycleShortcut, hideShortcut, findShortcut, emojiShortcut].map((shortcut) => shortcut.toLowerCase());
+  const shortcutKeys = [cycleShortcut, hideShortcut, findShortcut, emojiShortcut, newMemoShortcut, deleteMemoShortcut]
+    .filter(Boolean).map((shortcut) => shortcut.toLowerCase().replace(/^(ctrl|control|cmd|command)\+/, "commandorcontrol+"));
   if (new Set(shortcutKeys).size !== shortcutKeys.length) {
     setSettingsStatus("단축키는 서로 달라야 합니다.", 0);
     return;
@@ -7065,6 +7081,8 @@ async function applySettings() {
     hideShortcut,
     findShortcut,
     emojiShortcut,
+    newMemoShortcut,
+    deleteMemoShortcut,
     alwaysOnTop: alwaysOnTopInput?.checked !== false,
     followCursorDisplay: selectedDisplay === "auto",
     targetDisplayId: selectedDisplay === "auto" ? null : Number(selectedDisplay)
@@ -7089,7 +7107,7 @@ async function applySettings() {
   activeSubtitle.textContent = "";
   saveState();
 
-  const failures = [result.shortcutStatus?.cycle, result.shortcutStatus?.hide, result.shortcutStatus?.emoji]
+  const failures = Object.values(result.shortcutStatus || {})
     .filter((item) => item && !item.ok)
     .map((item) => item.message);
   setSettingsStatus(failures.length ? failures.join(" / ") : "적용됨");
@@ -7452,6 +7470,11 @@ setupShortcutCapture(cycleShortcutInput, DEFAULT_CYCLE_SHORTCUT);
 setupShortcutCapture(hideShortcutInput, DEFAULT_HIDE_SHORTCUT);
 if (findShortcutInput) setupShortcutCapture(findShortcutInput, DEFAULT_FIND_SHORTCUT);
 if (emojiShortcutInput) setupShortcutCapture(emojiShortcutInput, DEFAULT_EMOJI_SHORTCUT);
+setupShortcutCapture(newMemoShortcutInput, DEFAULT_NEW_MEMO_SHORTCUT);
+setupShortcutCapture(deleteMemoShortcutInput, "");
+window.addEventListener("focus", () => {
+  if (document.activeElement?.classList.contains("shortcut-input")) window.memoEdge.setShortcutCapture?.(true);
+});
 document.addEventListener("keydown", handleFindShortcut, true);
 document.addEventListener("keydown", handleEmojiShortcut, true);
 
@@ -7464,6 +7487,18 @@ window.memoEdge.onExpandedChanged((nextExpanded) => {
 
 window.memoEdge.onCycleFloating(cycleFloatingMemo);
 window.memoEdge.onOpenEmoji?.(openEmojiFromShortcut);
+window.memoEdge.onNewMemo?.(() => {
+  if (appShell.classList.contains("settings-open")) closeSettings();
+  addIndex();
+  scheduleEditorFocusAtEnd();
+});
+window.memoEdge.onDeleteMemo?.((id) => {
+  if (appShell.classList.contains("settings-open")) {
+    if (!id) return;
+    closeSettings();
+  }
+  deleteIndex(id || activeMemo()?.id);
+});
 window.memoEdge.onOpenSettings(openSettings);
 window.memoEdge.onReminderFired?.(handleReminderFired);
 window.memoEdge.onReminderOpenMemo?.(openMemoFromReminder);
