@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - master
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
 
 jobs:
   windows:
@@ -71,3 +76,41 @@ jobs:
           name: MEMO-BOM-Mac-${{ env.VERSION }}
           path: dist/*.dmg
           if-no-files-found: error
+
+  release:
+    name: Publish installers
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          mkdir release
+          cp artifacts/MEMO-BOM-Windows-*/*.exe "release/MEMO-BOM-Setup-$VERSION.exe"
+          cp artifacts/MEMO-BOM-Mac-*/*.dmg "release/MEMO-BOM-Setup-$VERSION-universal.dmg"
+          (cd release && sha256sum *.exe *.dmg > SHA256SUMS.txt)
+          NOTES=".github/release-notes/$GITHUB_REF_NAME.md"
+          if [ -f "$NOTES" ]; then
+            gh release create "$GITHUB_REF_NAME" release/* --verify-tag --title "MEMO BOM $GITHUB_REF_NAME" --notes-file "$NOTES"
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --verify-tag --title "MEMO BOM $GITHUB_REF_NAME" --generate-notes
+          fi

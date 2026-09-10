@@ -266,6 +266,7 @@ function createMemo(index = 0, defaults = defaultMemoDefaults) {
     backgroundPositionX: 0.5,
     backgroundPositionY: 0.5,
     attachments: [],
+    attachmentPanelOpen: false,
     reminders: [],
     html: "",
     scrollTop: 0,
@@ -530,6 +531,7 @@ function migrateLegacyState(raw) {
         backgroundPositionX: normalizeBackgroundPosition(item.backgroundPositionX),
         backgroundPositionY: normalizeBackgroundPosition(item.backgroundPositionY),
         attachments: normalizeAttachments(item.attachments),
+        attachmentPanelOpen: item.attachmentPanelOpen === true,
         reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
         scrollTop: normalizeMemoScrollTop(item.scrollTop),
@@ -576,6 +578,7 @@ function normalizeState(raw) {
         backgroundPositionX: normalizeBackgroundPosition(item.backgroundPositionX),
         backgroundPositionY: normalizeBackgroundPosition(item.backgroundPositionY),
         attachments: normalizeAttachments(item.attachments),
+        attachmentPanelOpen: item.attachmentPanelOpen === true,
         reminders: normalizeReminders(item.reminders),
         html: typeof item.html === "string" ? item.html : "",
         scrollTop: normalizeMemoScrollTop(item.scrollTop),
@@ -2215,6 +2218,7 @@ function memoPayload(memo) {
     backgroundPositionX: normalizeBackgroundPosition(memo.backgroundPositionX),
     backgroundPositionY: normalizeBackgroundPosition(memo.backgroundPositionY),
     attachments: normalizeAttachments(memo.attachments),
+    attachmentPanelOpen: memo.attachmentPanelOpen === true,
     reminders: normalizeReminders(memo.reminders),
     opacityControlsEnabled: opacityControlsEnabled(),
     toolbarButtons: normalizeToolbarButtons(state.prefs?.toolbarButtons),
@@ -2351,6 +2355,7 @@ function applyDetachedMemoUpdate(payload) {
   memo.backgroundPositionX = normalizeBackgroundPosition(payload.backgroundPositionX);
   memo.backgroundPositionY = normalizeBackgroundPosition(payload.backgroundPositionY);
   if (Array.isArray(payload.attachments)) memo.attachments = normalizeAttachments(payload.attachments);
+  if (typeof payload.attachmentPanelOpen === "boolean") memo.attachmentPanelOpen = payload.attachmentPanelOpen;
   if (Array.isArray(payload.reminders)) memo.reminders = normalizeReminders(payload.reminders);
   memo.html = typeof payload.html === "string" ? payload.html : memo.html;
   memo.updatedAt = Date.now();
@@ -2452,7 +2457,7 @@ function setMemoListOpen(open) {
   if (open) {
     setTrashOpen(false);
     closeMemoSearch();
-    setAttachmentPanelOpen(false);
+    setAttachmentPanelOpen(false, { persist: false });
     setReminderPanelOpen(false);
     renderAllMemoList();
   }
@@ -2466,7 +2471,7 @@ function setTrashOpen(open) {
   if (open) {
     setMemoListOpen(false);
     closeMemoSearch();
-    setAttachmentPanelOpen(false);
+    setAttachmentPanelOpen(false, { persist: false });
     setReminderPanelOpen(false);
     setTextColorPaletteOpen(false);
     setTablePickerOpen(false);
@@ -2571,10 +2576,17 @@ function repeatLabel(value) {
   }[normalizeReminderRepeat(value)];
 }
 
-function setAttachmentPanelOpen(open) {
+function setAttachmentPanelOpen(open, { persist = true } = {}) {
   if (!attachmentPanel || !attachmentButton) return;
+  open = Boolean(open);
+  const memo = activeMemo();
+  if (persist && memo && memo.attachmentPanelOpen !== open) {
+    memo.attachmentPanelOpen = open;
+    saveState();
+  }
   attachmentPanel.classList.toggle("hidden", !open);
   attachmentButton.classList.toggle("active", Boolean(open));
+  attachmentButton.setAttribute("aria-expanded", String(open));
   if (open) {
     setReminderStatus("");
     setMemoListOpen(false);
@@ -2614,7 +2626,7 @@ function syncAttachmentControls(memo = activeMemo()) {
     attachmentCountBadge.textContent = String(count);
     attachmentCountBadge.classList.toggle("hidden", count <= 0);
   }
-  if (attachmentPanel && !attachmentPanel.classList.contains("hidden")) renderAttachmentPanel();
+  setAttachmentPanelOpen(memo?.attachmentPanelOpen === true, { persist: false });
 }
 
 function syncReminderControls(memo = activeMemo()) {

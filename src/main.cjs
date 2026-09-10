@@ -850,6 +850,7 @@ function normalizeDetachedMemo(memo = {}) {
     backgroundPositionX: normalizeBackgroundPosition(memo.backgroundPositionX),
     backgroundPositionY: normalizeBackgroundPosition(memo.backgroundPositionY),
     attachments: Array.isArray(memo.attachments) ? memo.attachments.map(normalizeAttachmentPayload).filter(Boolean) : [],
+    attachmentPanelOpen: memo.attachmentPanelOpen === true,
     reminders: Array.isArray(memo.reminders) ? memo.reminders : [],
     opacityControlsEnabled: memo.opacityControlsEnabled !== false,
     toolbarButtons: memo.toolbarButtons && typeof memo.toolbarButtons === "object" ? { ...memo.toolbarButtons } : null,

@@ -729,6 +729,7 @@ function applyMemo(nextMemo) {
     backgroundPositionX: normalizeBackgroundPosition(nextMemo?.backgroundPositionX),
     backgroundPositionY: normalizeBackgroundPosition(nextMemo?.backgroundPositionY),
     attachments: normalizeAttachments(Array.isArray(nextMemo?.attachments) ? nextMemo.attachments : previousMemo.attachments),
+    attachmentPanelOpen: (nextMemo?.attachmentPanelOpen ?? previousMemo.attachmentPanelOpen) === true,
     reminders: normalizeReminders(Array.isArray(nextMemo?.reminders) ? nextMemo.reminders : previousMemo.reminders),
     opacityControlsEnabled:
       nextMemo?.opacityControlsEnabled === undefined
@@ -796,6 +797,7 @@ function detachedMemoPatch(includeHtml = memoHtmlDirty) {
     backgroundPositionX: memo.backgroundPositionX,
     backgroundPositionY: memo.backgroundPositionY,
     attachments: normalizeAttachments(memo.attachments),
+    attachmentPanelOpen: memo.attachmentPanelOpen === true,
     reminders: normalizeReminders(memo.reminders)
   };
   if (includeHtml) {
@@ -2039,10 +2041,16 @@ function repeatLabel(value) {
   }[normalizeReminderRepeat(value)];
 }
 
-function setAttachmentPanelOpen(open) {
+function setAttachmentPanelOpen(open, { persist = true } = {}) {
   if (!attachmentPanel || !attachmentButton) return;
+  open = Boolean(open);
+  if (persist && memo && memo.attachmentPanelOpen !== open) {
+    memo.attachmentPanelOpen = open;
+    saveNow();
+  }
   attachmentPanel.classList.toggle("hidden", !open);
   attachmentButton.classList.toggle("active", Boolean(open));
+  attachmentButton.setAttribute("aria-expanded", String(open));
   if (open) {
     setReminderPanelOpen(false);
     setTextColorPaletteOpen(false);
@@ -2078,7 +2086,7 @@ function syncAttachmentControls() {
     attachmentCountBadge.textContent = String(count);
     attachmentCountBadge.classList.toggle("hidden", count <= 0);
   }
-  if (attachmentPanel && !attachmentPanel.classList.contains("hidden")) renderAttachmentPanel();
+  setAttachmentPanelOpen(memo?.attachmentPanelOpen === true, { persist: false });
 }
 
 function syncReminderControls() {
@@ -4240,14 +4248,6 @@ document.addEventListener("pointerdown", (event) => {
     !textColorField?.contains(target)
   ) {
     setTextColorPaletteOpen(false);
-  }
-  if (
-    attachmentPanel &&
-    !attachmentPanel.classList.contains("hidden") &&
-    !attachmentPanel.contains(target) &&
-    !attachmentButton?.contains(target)
-  ) {
-    setAttachmentPanelOpen(false);
   }
   if (
     reminderPanel &&
